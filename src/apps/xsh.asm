@@ -26,24 +26,24 @@ read_databuf:     times 512 db 0
 default_username: db 'autruxalos', 0
 
 ; -----------------------------------------------------------------------
-; Prompt: |user|<usuario>|@ o %
+; Prompt: |user|<username>|@ or %
 ; -----------------------------------------------------------------------
 msg_prompt_seg1:  db 'user', 0
 msg_prompt_at:    db '@ ', 0
 msg_prompt_pct:   db '% ', 0
 msg_pipe:         db '|', 0
 
-; Mensajes generales del shell (usados por varios comandos)
-msg_unknown_cmd:  db 'XSH: comando no reconocido. Escribe "ver" para ayuda.', 10, 0
-msg_missing_arg:  db 'XSH: falta argumento.', 10, 0
-msg_err_exists:   db 'XSH: ya existe.', 10, 0
-msg_err_notfound: db 'XSH: no encontrado.', 10, 0
-msg_err_nospace:  db 'XSH: sin espacio en disco.', 10, 0
-msg_created:      db 'XSH: creado.', 10, 0
-msg_removed:      db 'XSH: eliminado.', 10, 0
-msg_write_done:   db 10, 'XSH: escrito.', 10, 0
-msg_read_start:   db 10, '--- contenido ---', 10, 0
-msg_read_end:     db '--- fin ---', 10, 0
+; General shell messages (used by multiple commands)
+msg_unknown_cmd:  db 'XSH: unknown command. Type "help" for assistance.', 10, 0
+msg_missing_arg:  db 'XSH: missing argument.', 10, 0
+msg_err_exists:   db 'XSH: already exists.', 10, 0
+msg_err_notfound: db 'XSH: not found.', 10, 0
+msg_err_nospace:  db 'XSH: no space on disk.', 10, 0
+msg_created:      db 'XSH: created.', 10, 0
+msg_removed:      db 'XSH: removed.', 10, 0
+msg_write_done:   db 10, 'XSH: written.', 10, 0
+msg_read_start:   db 10, '--- content ---', 10, 0
+msg_read_end:     db '--- end ---', 10, 0
 str_dotdot:       db '..', 0
 
 ; -----------------------------------------------------------------------
@@ -65,18 +65,18 @@ cmd_table:
     dq str_cmd_halt,       xsh_cmd_halt
     dq 0, 0
 
-str_cmd_ver:        db 'ver', 0
+str_cmd_ver:        db 'help', 0
 str_cmd_clear:      db 'clear', 0
 str_cmd_list:       db 'list', 0
-str_cmd_make_dir:   db 'make-dir', 0
-str_cmd_make_file:  db 'make-file', 0
+str_cmd_make_dir:   db 'mkdir', 0
+str_cmd_make_file:  db 'touch', 0
 str_cmd_remove:     db 'remove', 0
-str_cmd_read:       db 'read', 0
+str_cmd_read:       db 'cat', 0
 str_cmd_write:      db 'write', 0
-str_cmd_ubicate:    db 'ubicate', 0
-str_cmd_whereami:   db 'whereami', 0
-str_cmd_sprusr:     db 'sprusr', 0
-str_cmd_exofetch:   db 'exofetch', 0
+str_cmd_ubicate:    db 'cd', 0
+str_cmd_whereami:   db 'pwd', 0
+str_cmd_sprusr:     db 'sudo', 0
+str_cmd_exofetch:   db 'sysinfo', 0
 str_cmd_halt:       db 'halt', 0
 
 ; -----------------------------------------------------------------------
