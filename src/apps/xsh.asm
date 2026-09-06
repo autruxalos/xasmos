@@ -23,7 +23,7 @@ xsh_is_root:      db 0               ; 0 = usuario normal, 1 = sprusr
 write_databuf:    times 512 db 0
 read_databuf:     times 512 db 0
 
-default_username: db 'autruxalos', 0
+default_username: db 'xwalaz', 0
 
 ; -----------------------------------------------------------------------
 ; Prompt: |user|<username>|@ or %
