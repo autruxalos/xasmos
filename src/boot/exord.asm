@@ -1,11 +1,11 @@
 ; =============================================================================
-; XBOOT - XASMOS Bootloader  [XSPEC-0001]
+; Exord — XASMOS Bootloader  [XSPEC-0001]
 ; Loads XKERNEL from sector 1 to 0x0000:0x9000 via extended LBA
 ; =============================================================================
 [BITS 16]
 [ORG 0x7C00]
 
-xboot_main:
+exord_main:
     cli
     xor ax, ax
     mov ds, ax
@@ -99,7 +99,7 @@ bios_print:
     ret
 
 BOOT_DRIVE  db 0
-MSG_LOADING db 'XASMOS Boot - Loading...', 13, 10, 0
+MSG_LOADING db 'Exord - Loading...', 13, 10, 0
 MSG_LBA     db 'LBA Mode', 13, 10, 0
 MSG_CHS     db 'CHS Mode', 13, 10, 0
 MSG_OK      db 'Kernel loaded! Jumping...', 13, 10, 0
