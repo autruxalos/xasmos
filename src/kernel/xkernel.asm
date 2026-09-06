@@ -1,9 +1,6 @@
 ; =============================================================================
-; XKERNEL — XOS Exokernel [XSPEC-0004]
-; Arquitectura: x86-64, cargado por XBOOT propio (NO GRUB/Multiboot2)
-; Cadena de arranque: XBOOT (0x7C00) -> XKERNEL (0x9000, 16-bit)
-;                   16-bit -> 32-bit -> 64-bit -> EXIT -> XSH
-;                     -> 32-bit -> 64-bit -> EXIT -> XSH
+; XKERNEL — XASMOS Exokernel Core [XSPEC-0004]
+; x86-64, loaded by XBOOT at 0x9000
 ; =============================================================================
 [BITS 16]
 org 0x9000
@@ -39,35 +36,28 @@ print16:
 
 msg_16 db 'XKERNEL 16-bit OK', 13, 10, 0
 
-; -----------------------------------------------------------------------
-; GDT de 32 bits (unica — nombre unico en todo el proyecto)
-; -----------------------------------------------------------------------
+; (unchanged - 16-bit init message is self-explanatory)
+
 align 8
 gdt32_start:
     dq 0x0000000000000000
-    dq 0x00CF9A000000FFFF   ; 0x08 codigo 32-bit
-    dq 0x00CF92000000FFFF   ; 0x10 datos  32-bit
+    dq 0x00CF9A000000FFFF
+    dq 0x00CF92000000FFFF
 gdt32_end:
 gdt32_ptr:
     dw gdt32_end - gdt32_start - 1
     dd gdt32_start
 
-; -----------------------------------------------------------------------
-; GDT de 64 bits (unica — nombre unico en todo el proyecto)
-; -----------------------------------------------------------------------
 align 8
 gdt64_start:
     dq 0x0000000000000000
-    dq 0x00209A0000000000   ; 0x08 codigo 64-bit
-    dq 0x0000920000000000   ; 0x10 datos  64-bit
+    dq 0x00209A0000000000
+    dq 0x0000920000000000
 gdt64_end:
 gdt64_ptr:
     dw gdt64_end - gdt64_start - 1
     dd gdt64_start
 
-; -----------------------------------------------------------------------
-; Pilas (una sola declaracion de cada una en todo el proyecto)
-; -----------------------------------------------------------------------
 align 16
 times 512  db 0
 stack_top_32:
@@ -76,11 +66,7 @@ align 16
 times 2048 db 0
 stack_top_64:
 
-; =============================================================================
-; KERNEL 32-BIT
-; =============================================================================
 [BITS 32]
-
 kernel_32_entry:
     mov ax, 0x10
     mov ds, ax
@@ -90,30 +76,25 @@ kernel_32_entry:
     mov ss, ax
     mov esp, stack_top_32
 
-    ; Habilitar PAE
     mov eax, cr4
     or  eax, (1 << 5)
     mov cr4, eax
 
-    ; Tablas de paginas identidad 0-2MB en 0x1000/0x2000/0x3000
-    ; (zona libre por debajo del bootloader, no usada por nadie mas)
     mov edi, 0x1000
     xor eax, eax
     mov ecx, 0x3000 / 4
     rep stosd
-    mov dword [0x1000], 0x2003  ; PML4[0] -> 0x2000
-    mov dword [0x2000], 0x3003  ; PDPT[0] -> 0x3000
-    mov dword [0x3000], 0x0083  ; PD[0]   -> 2MB huge page identidad
+    mov dword [0x1000], 0x2003
+    mov dword [0x2000], 0x3003
+    mov dword [0x3000], 0x0083
     mov eax, 0x1000
     mov cr3, eax
 
-    ; Activar Long Mode en EFER
     mov ecx, 0xC0000080
     rdmsr
     or  eax, (1 << 8)
     wrmsr
 
-    ; Cargar GDT64 y activar paginacion + PE
     lgdt [gdt64_ptr]
     mov eax, cr0
     or  eax, 0x80000001
@@ -121,11 +102,7 @@ kernel_32_entry:
 
     jmp 0x08:kernel_64_entry
 
-; =============================================================================
-; KERNEL 64-BIT
-; =============================================================================
 [BITS 64]
-
 kernel_64_entry:
     mov ax, 0x10
     mov ds, ax
@@ -134,11 +111,9 @@ kernel_64_entry:
     mov gs, ax
     mov ss, ax
     mov rsp, stack_top_64
+    cld                       ; asegurar DF=0 para todas las rep string ops
 
     call xk_init_video
-
-    ; Unico punto de entrada al init del sistema.
-    ; exit_main_executor esta definido en src/init/exit.asm
     call exit_main_executor
 
 .halt:
@@ -148,8 +123,6 @@ kernel_64_entry:
 
 ; =============================================================================
 ; VARIABLES GLOBALES DEL KERNEL
-; Declaradas UNA sola vez aqui. exit.asm / xsh.asm / exfs.asm las referencian
-; con `extern` implicito (flat binary: solo necesitan el simbolo global).
 ; =============================================================================
 global cursor_pos
 global readline_buf
@@ -157,21 +130,17 @@ global exfs_cur_dir_name
 global exfs_cur_dir_lba
 global exfs_io_buf
 
-cursor_pos:         dw 0             ; posicion en celdas VGA (0..1999)
-readline_buf:       times 256 db 0   ; buffer de linea leida por teclado
+cursor_pos:         dw 0
+readline_buf:       times 256 db 0
 exfs_cur_dir_name:  db '|', 0
                      times 126 db 0
 exfs_cur_dir_lba:   dq 0
-exfs_io_buf:        times 512 db 0   ; buffer de I/O de 1 sector para EXFS
+exfs_io_buf:        times 512 db 0
 
-; =============================================================================
-; VIDEO — VGA texto 80x25 en 0xB8000
-; =============================================================================
 VGA_BASE equ 0xB8000
 VGA_COLS equ 80
 VGA_ROWS equ 25
 
-; xk_init_video — limpia pantalla, resetea cursor
 global xk_init_video
 xk_init_video:
     push rdi
@@ -187,7 +156,6 @@ xk_init_video:
     pop  rdi
     ret
 
-; xk_init_keyboard — vacia el buffer del controlador PS/2 por si hay basura
 global xk_init_keyboard
 xk_init_keyboard:
     push rax
@@ -201,7 +169,6 @@ xk_init_keyboard:
     pop  rax
     ret
 
-; xk_scroll — sube el contenido VGA una linea, limpia la ultima
 global xk_scroll
 xk_scroll:
     push rsi
@@ -222,8 +189,6 @@ xk_scroll:
     pop  rsi
     ret
 
-; xk_putchar — AL = caracter, BL = atributo de color
-; Maneja: newline (10), retorno de carro (13), backspace (8), scroll automatico
 global xk_putchar
 xk_putchar:
     push rax
@@ -292,7 +257,6 @@ xk_putchar:
     pop rax
     ret
 
-; xk_print — RSI = string null-terminated, BL = atributo
 global xk_print
 xk_print:
     push rax
@@ -308,7 +272,6 @@ xk_print:
     pop rax
     ret
 
-; xk_println — xk_print + newline
 global xk_println
 xk_println:
     call xk_print
@@ -321,9 +284,6 @@ xk_println:
     pop  rax
     ret
 
-; xk_readline — lee linea real del teclado PS/2 (scancode set 1)
-; Entrada: RDI = buffer destino, RCX = max caracteres
-; Salida:  RAX = longitud leida; buffer null-terminated
 scancode_map:
     db 0,0,'1','2','3','4','5','6','7','8','9','0','-','=',8,9
     db 'q','w','e','r','t','y','u','i','o','p','[',']',13,0
@@ -331,6 +291,7 @@ scancode_map:
     db 'z','x','c','v','b','n','m',44,46,47,0,0,0,32
     times (256 - ($ - scancode_map)) db 0
 
+; xk_readline — RDI=buffer, RCX=max chars. RAX=longitud, buffer null-terminado
 global xk_readline
 xk_readline:
     push rbx
@@ -338,7 +299,7 @@ xk_readline:
     push rdi
     push rcx
 
-    xor  rdx, rdx            ; longitud actual
+    xor  rdx, rdx
 
 .rd:
     in   al, 0x64
@@ -346,7 +307,7 @@ xk_readline:
     jz   .rd
     in   al, 0x60
 
-    cmp  al, 0x80             ; key-up, ignorar
+    cmp  al, 0x80
     jge  .rd
 
     push rbx
@@ -403,11 +364,28 @@ xk_readline:
     pop  rbx
     ret
 
-; =============================================================================
-; UTILIDADES DE STRING (una sola definicion de cada una)
-; =============================================================================
+; xk_getkey — lectura cruda de una tecla (para editores/apps interactivas)
+; Salida: AL = ascii traducido (0 si no mapeado), AH = scancode crudo
+global xk_getkey
+xk_getkey:
+    push rbx
+    push rdx
+.rd:
+    in   al, 0x64
+    test al, 1
+    jz   .rd
+    in   al, 0x60
+    cmp  al, 0x80
+    jge  .rd
+    mov  dl, al
+    lea  rbx, [rel scancode_map]
+    movzx rax, al
+    mov  al, [rbx + rax]
+    mov  ah, dl
+    pop  rdx
+    pop  rbx
+    ret
 
-; xk_strcmp — compara [RSI] con [RDI]. RAX=0 si iguales, RAX=1 si no.
 global xk_strcmp
 xk_strcmp:
     push rsi
@@ -436,7 +414,6 @@ xk_strcmp:
     pop  rsi
     ret
 
-; xk_strlen — RSI = string, retorna longitud en RAX
 global xk_strlen
 xk_strlen:
     push rsi
@@ -451,7 +428,6 @@ xk_strlen:
     pop  rsi
     ret
 
-; xk_strncpy — copia max RCX chars de RSI a RDI, null-terminado
 global xk_strncpy
 xk_strncpy:
     test rcx, rcx
@@ -473,4 +449,4 @@ xk_strncpy:
 ; =============================================================================
 %include "src/drivers/exfs.asm"
 %include "src/init/exit.asm"
-%include "src/apps/xsh.asm"
+%include "src/apps/xsh/xsh.asm"
