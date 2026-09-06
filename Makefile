@@ -1,108 +1,169 @@
 # =============================================================================
-# MAKEFILE - XASMOS EXOKERNEL OPERATING SYSTEM
+# XASMOS Makefile -- Wayward Kernel + Sourcephilia Integration
 # =============================================================================
-# IMPORTANT — build architecture:
-#    src/kernel/xkernel.asm is the ONLY file assembled as the kernel.
-#    It integrates src/drivers/exfs.asm, src/init/exit.asm, and src/apps/xsh.asm
-#    via %include, because NASM's `-f bin` format has no linker:
-#    exit.asm/xsh.asm/exfs.asm CANNOT be assembled separately; doing so
-#    fails with "symbol not defined" because each .bin file is isolated.
+# Uso:
+#   make              -- compila imagen de disco completa (DEBUG=0)
+#   make run          -- ejecuta en QEMU
+#   make clean        -- limpia binarios
+#   make info         -- muestra tama?os
+#   DEBUG=1 make      -- con s?mbolos de depuraci?n NASM
 #
-# Disk Map:
-#    Sector 0      -> XBOOT   (MBR, exactly 512 bytes)
-#    Sector 1..64  -> XKERNEL (up to 32 KB, includes EXFS+EXIT+XSH)
-#    Sector 38+    -> EXFS Data (hot-formatted by the kernel)
+# Sourcephilia integration:
+#   make bootstrap    -- prepara estructura para sourcephilia
+#   make sources      -- descarga fuentes de paquetes (stub)
 # =============================================================================
 
-ASM      = nasm
-ASMFLAGS = -f bin -w+all -Werror=zeroing
+# Herramientas
+ASM       = nasm
+ASMFLAGS  = -f bin -w+all -Werror=zeroing
+DEBUG     ?= 0
 
-BOOT_SRC   = src/boot/xboot.asm
-KERNEL_SRC = src/kernel/xkernel.asm
+ifeq ($(DEBUG),1)
+    ASMFLAGS += -g
+endif
 
-# Dependencies: if any of these change, the kernel must be recompiled
+# Detecci?n de arquitectura local (para compilaci?n de paquetes sourcephilia)
+UNAME_M   = $(shell uname -m)
+ifeq ($(UNAME_M),x86_64)
+    LOCAL_ARCH = x86-64
+else ifeq ($(UNAME_M),i686)
+    LOCAL_ARCH = x86-32
+else ifeq ($(UNAME_M),armv7l)
+    LOCAL_ARCH = armv7h
+else
+    LOCAL_ARCH = unknown
+endif
+
+# Directorios
+SRC_DIR       = src
+BIN_DIR       = bin
+BUILD_DIR     = build
+PKG_DIR       = packages
+SOURCEPHILIA  = $(PKG_DIR)/sourcephilia
+
+# Archivos fuente
+BOOT_SRC   = $(SRC_DIR)/boot/exord.asm
+KERNEL_SRC = $(SRC_DIR)/kernel/xkernel.asm
+
+# Dependencias del kernel (todo lo que se %include en xkernel.asm)
 KERNEL_DEPS = $(KERNEL_SRC) \
-              src/drivers/exfs.asm \
-              src/init/exit.asm \
-              src/apps/xsh.asm
+              $(SRC_DIR)/drivers/exfs.asm \
+              $(SRC_DIR)/init/exit.asm \
+              $(SRC_DIR)/apps/xsh/xsh.asm \
+              $(SRC_DIR)/apps/xsh/ver.asm \
+              $(SRC_DIR)/apps/xsh/clear.asm \
+              $(SRC_DIR)/apps/xsh/list.asm \
+              $(SRC_DIR)/apps/xsh/make.asm \
+              $(SRC_DIR)/apps/xsh/remove.asm \
+              $(SRC_DIR)/apps/xsh/read.asm \
+              $(SRC_DIR)/apps/xsh/write.asm \
+              $(SRC_DIR)/apps/xsh/locate.asm \
+              $(SRC_DIR)/apps/xsh/whereami.asm \
+              $(SRC_DIR)/apps/xsh/sprusr.asm \
+              $(SRC_DIR)/apps/xsh/halt.asm \
+              $(SRC_DIR)/apps/xsh/exofetch/exofetch.asm
 
-BOOT_BIN   = bin/xboot.bin
-KERNEL_BIN = bin/xkernel.bin
+# Binarios
+BOOT_BIN   = $(BIN_DIR)/exord.bin
+KERNEL_BIN = $(BIN_DIR)/xkernel.bin
+IMAGE      = xos.img
 
-IMAGE         = xos.img
-IMAGE_SECTORS = 8192          # 4 MB total image size
+# Configuraci?n de imagen
+IMAGE_SECTORS = 8192
+SECTOR_SIZE   = 512
 
-QEMU      = qemu-system-i386
-QEMUFLAGS = -m 16M -no-reboot -no-shutdown
+# QEMU
+QEMU       = qemu-system-x86_64
+QEMUFLAGS  = -m 64M -no-reboot -no-shutdown
 
-.PHONY: all run run-nographic debug clean info
+# Targets
+.PHONY: all run clean info bootstrap sources help
+
+help:
+	@echo "XASMOS Makefile -- Wayward Kernel"
+	@echo ""
+	@echo "Targets b?sicos:"
+	@echo "  make              Compilar imagen de disco"
+	@echo "  make run          Ejecutar en QEMU"
+	@echo "  make clean        Limpiar binarios"
+	@echo "  make info         Mostrar tama?os"
+	@echo ""
+	@echo "Sourcephilia (gestor de paquetes):"
+	@echo "  make bootstrap    Preparar estructura para sourcephilia"
+	@echo ""
+	@echo "Opciones:"
+	@echo "  DEBUG=1 make      Compilar con s?mbolos de depuraci?n"
+	@echo "  ARCH=armv7h make  Target espec?fico (stub, falta implementar)"
 
 all: $(IMAGE)
 
-bin:
-	@mkdir -p bin
+$(BIN_DIR):
+	@mkdir -p $(BIN_DIR)
 
-# --- XBOOT: must be exactly 512 bytes with 0xAA55 signature ---
-$(BOOT_BIN): $(BOOT_SRC) | bin
-	@echo "[NASM] XBOOT..."
-	$(ASM) $(ASMFLAGS) $(BOOT_SRC) -o $(BOOT_BIN)
+$(KERNEL_BIN): $(KERNEL_DEPS) | $(BIN_DIR)
+	@echo "[NASM] Wayward Kernel ($(KERNEL_SRC))"
+	@$(ASM) $(ASMFLAGS) $(KERNEL_SRC) -o $(KERNEL_BIN)
+	@if [ ! -f $(KERNEL_BIN) ]; then \
+		echo "ERROR: no se gener? $(KERNEL_BIN)"; exit 1; \
+	fi
+	@sz=$$(wc -c < $(KERNEL_BIN)); \
+	if [ $$sz -gt $$(( 64 * $(SECTOR_SIZE) )) ]; then \
+		echo "ERROR: Kernel demasiado grande ($$sz bytes, m?x 32KB)"; exit 1; \
+	fi
+	@echo "      OK ($$(wc -c < $(KERNEL_BIN)) bytes)"
+
+$(BOOT_BIN): $(BOOT_SRC) | $(BIN_DIR)
+	@echo "[NASM] Exord Bootloader ($(BOOT_SRC))"
+	@$(ASM) $(ASMFLAGS) $(BOOT_SRC) -o $(BOOT_BIN)
 	@sz=$$(wc -c < $(BOOT_BIN)); \
 	if [ $$sz -ne 512 ]; then \
-		echo "ERROR: XBOOT is $$sz bytes (must be 512)"; exit 1; \
+		echo "ERROR: Exord debe ser exactamente 512 bytes (tiene $$sz)"; exit 1; \
 	fi
-	@sig=$$(od -An -tx1 -j 510 -N 2 $(BOOT_BIN) | tr -d ' '); \
-	if [ "$$sig" != "55aa" ]; then \
-		echo "ERROR: incorrect MBR signature ($$sig, expected 55aa)"; exit 1; \
-	fi
-	@echo "      XBOOT OK (512 bytes, signature 0xAA55)"
+	@echo "      OK (512 bytes)"
 
-# --- XKERNEL: includes EXFS + EXIT + XSH in a single flat binary ---
-$(KERNEL_BIN): $(KERNEL_DEPS) | bin
-	@echo "[NASM] XKERNEL (+ EXFS + EXIT + XSH via %include)..."
-	$(ASM) $(ASMFLAGS) $(KERNEL_SRC) -o $(KERNEL_BIN)
-	@sz=$$(wc -c < $(KERNEL_BIN)); \
-	maxsz=$$((64 * 512)); \
-	if [ $$sz -gt $$maxsz ]; then \
-		echo "ERROR: XKERNEL size is $$sz bytes, exceeds reserved $$maxsz bytes"; \
-		echo "       (increase KERNEL_SECTORS in Makefile and XBOOT)"; exit 1; \
-	fi
-	@echo "      XKERNEL OK ($$(wc -c < $(KERNEL_BIN)) bytes)"
-
-# --- Final Disk Image ---
 $(IMAGE): $(BOOT_BIN) $(KERNEL_BIN)
-	@echo ""
-	@echo "[IMG] Creating $(IMAGE) ($(IMAGE_SECTORS) sectors = $$(( $(IMAGE_SECTORS)*512/1024/1024 )) MB)..."
-	dd if=/dev/zero of=$(IMAGE) bs=512 count=$(IMAGE_SECTORS) status=none
-	dd if=$(BOOT_BIN)   of=$(IMAGE) bs=512 seek=0 count=1 conv=notrunc status=none
-	@echo "      [sector 0] XBOOT"
-	dd if=$(KERNEL_BIN) of=$(IMAGE) bs=512 seek=1 conv=notrunc status=none
-	@echo "      [sector 1] XKERNEL ($$(( ($$(wc -c < $(KERNEL_BIN)) + 511) / 512 )) sectors)"
-	@echo ""
-	@echo "[OK] $(IMAGE) ready. Use 'make run' to execute."
+	@echo "[IMG] Creando disco xos.img ($(IMAGE_SECTORS) sectores)..."
+	@dd if=/dev/zero of=$(IMAGE) bs=$(SECTOR_SIZE) count=$(IMAGE_SECTORS) status=none
+	@dd if=$(BOOT_BIN) of=$(IMAGE) bs=$(SECTOR_SIZE) seek=0 count=1 conv=notrunc status=none
+	@dd if=$(KERNEL_BIN) of=$(IMAGE) bs=$(SECTOR_SIZE) seek=1 conv=notrunc status=none
+	@echo "[OK] Imagen lista: $(IMAGE)"
 
-# --- Run in QEMU (16-bit 8086 / i386 mode compatible) ---
 run: $(IMAGE)
-	@echo "[QEMU] Starting XOS..."
-	$(QEMU) -cpu 486 -drive format=raw,file=$(IMAGE),if=ide,media=disk $(QEMUFLAGS) -display sdl
-
-# --- Run in text mode (no SDL, useful for servers/SSH) ---
-run-nographic: $(IMAGE)
-	@echo "[QEMU] Starting XASMOS (serial/console mode)..."
-	$(QEMU) -cpu 486 -drive format=raw,file=$(IMAGE),if=ide,media=disk $(QEMUFLAGS) -display curses
-
-# --- Debug: QEMU monitor + interrupt/reset logs ---
-debug: $(IMAGE)
-	@echo "[QEMU] Debug mode -- Press Ctrl+Alt+2 for the monitor"
-	$(QEMU) -cpu 486 -drive format=raw,file=$(IMAGE),if=ide,media=disk $(QEMUFLAGS) \
-		-monitor stdio -d int,cpu_reset -D qemu_debug.log -display sdl
+	@echo "[QEMU] Iniciando..."
+	$(QEMU) -drive format=raw,file=$(IMAGE),if=ide,media=disk $(QEMUFLAGS) -display sdl
 
 info:
-	@echo "XBOOT:   $$(wc -c < $(BOOT_BIN) 2>/dev/null || echo '(not compiled)') bytes"
-	@echo "XKERNEL: $$(wc -c < $(KERNEL_BIN) 2>/dev/null || echo '(not compiled)') bytes"
-	@echo "IMAGE:   $$(wc -c < $(IMAGE) 2>/dev/null || echo '(not generated)') bytes"
+	@echo "=== Tama?os ==="
+	@echo "Exord:   $$([ -f $(BOOT_BIN) ] && wc -c < $(BOOT_BIN) || echo 'no compilado') bytes"
+	@echo "Kernel:  $$([ -f $(KERNEL_BIN) ] && wc -c < $(KERNEL_BIN) || echo 'no compilado') bytes"
+	@echo "Imagen:  $$([ -f $(IMAGE) ] && wc -c < $(IMAGE) || echo 'no existe') bytes"
+	@echo ""
+	@echo "Arquitectura local detectada: $(LOCAL_ARCH)"
 
 clean:
-	@echo "[CLEAN] Deleting binaries and image..."
-	rm -rf bin/
-	rm -f $(IMAGE) qemu_debug.log
-	@echo "      Done."
+	@echo "[CLEAN] Eliminando binarios..."
+	@rm -rf $(BIN_DIR) $(IMAGE) $(BUILD_DIR)
+	@echo "      OK"
+
+# =========================================================================
+# SOURCEPHILIA: Gestor de paquetes compilados desde fuente
+# =========================================================================
+
+bootstrap: | $(BIN_DIR)
+	@echo "[SOURCEPHILIA] Preparando estructura..."
+	@mkdir -p $(SOURCEPHILIA)/{recipes,cache,$(LOCAL_ARCH)}
+	@echo "      OK (estructura en $(SOURCEPHILIA))"
+
+sources:
+	@echo "[SOURCEPHILIA] Stub: download sources (not implemented yet)"
+	@echo "              This is where: curl, git clone, checksum verification, etc. goes"
+
+# =========================================================================
+# Debug targets (future)
+# =========================================================================
+
+disasm:
+	@echo "[DISASM] Generando listado de Exord..."
+	@ndisasm -b 16 $(BOOT_BIN) > exord.dis
+	@wc -l exord.dis
+	@echo "        (archivo: exord.dis)"
