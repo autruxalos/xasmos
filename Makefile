@@ -49,7 +49,7 @@ KERNEL_SRC = $(SRC_DIR)/kernel/xkernel.asm
 KERNEL_DEPS = $(KERNEL_SRC) \
               $(SRC_DIR)/drivers/exfs.asm \
               $(SRC_DIR)/init/exit.asm \
-              $(SRC_DIR)/apps/xsh/xsh.asm \
+              $(SRC_DIR)/apps/xsh.asm \
               $(SRC_DIR)/apps/xsh/ver.asm \
               $(SRC_DIR)/apps/xsh/clear.asm \
               $(SRC_DIR)/apps/xsh/list.asm \
