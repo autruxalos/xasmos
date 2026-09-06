@@ -14,7 +14,7 @@ POSIX Independence: Eliminates the logical overhead of traditional file descript
 
 This master repository links together the six essential peripheral projects through modular submodules:
 
-src/boot ── XBOOT: Master Boot Record (MBR) bootloader.
+src/boot ── EXORD: Master Boot Record (MBR) bootloader.
 src/kernel ── XKERNEL: Secure multiplexing kernel.
 src/kernel/drivers/exfs ── EXFS: Inode-free file system driver.
 src/init ── EXIT: User-space initialization process.
