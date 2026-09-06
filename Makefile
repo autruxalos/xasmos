@@ -122,7 +122,7 @@ $(BOOT_BIN): $(BOOT_SRC) | $(BIN_DIR)
 	@echo "      OK (512 bytes)"
 
 $(IMAGE): $(BOOT_BIN) $(KERNEL_BIN)
-	@echo "[IMG] Creando disco xos.img ($(IMAGE_SECTORS) sectores)..."
+	@echo "[IMG] Creating disc xasmos.img ($(IMAGE_SECTORS) sectores)..."
 	@dd if=/dev/zero of=$(IMAGE) bs=$(SECTOR_SIZE) count=$(IMAGE_SECTORS) status=none
 	@dd if=$(BOOT_BIN) of=$(IMAGE) bs=$(SECTOR_SIZE) seek=0 count=1 conv=notrunc status=none
 	@dd if=$(KERNEL_BIN) of=$(IMAGE) bs=$(SECTOR_SIZE) seek=1 conv=notrunc status=none
