@@ -1,11 +1,9 @@
 ; =============================================================================
-; EXFS — Exokernel Filesystem Driver [XSPEC-0002]
-; Acceso a disco via ATA PIO (compatible con QEMU -drive if=ide)
-; Requiere: xk_strcmp (xkernel.asm), exfs_io_buf / exfs_cur_dir_lba (xkernel.asm)
+; EXFS — Sistema de archivos del exokernel [XSPEC-0002]
 ; =============================================================================
 [BITS 64]
 
-EXFS_MAGIC      equ 0x53465845      ; 'EXFS' little-endian
+EXFS_MAGIC      equ 0x53465845
 EXFS_SB_LBA     equ 1
 EXFS_BM_LBA     equ 2
 EXFS_XOBJ_LBA   equ 6
@@ -16,14 +14,10 @@ XOBJ_FREE       equ 0
 XOBJ_DIR        equ 1
 XOBJ_DOCUMENT   equ 3
 
-msg_exfs_ok:      db '[EXFS] SuperBlock validado', 10, 0
-msg_exfs_format:  db '[EXFS] Sin formato -- formateando disco...', 10, 0
-msg_exfs_ready:   db '[EXFS] Listo. Directorio raiz: |', 10, 0
+msg_exfs_ok:      db '[EXFS] Superblock validated', 10, 0
+msg_exfs_format:  db '[EXFS] Unformatted -- formatting disk...', 10, 0
+msg_exfs_ready:   db '[EXFS] Ready. Root directory: |', 10, 0
 
-; -----------------------------------------------------------------------
-; exfs_ata_read — lee 1 sector LBA28 en [RDI]
-; Entrada: EAX = LBA, RDI = buffer destino
-; -----------------------------------------------------------------------
 global exfs_ata_read
 exfs_ata_read:
     push rax
@@ -66,6 +60,7 @@ exfs_ata_read:
     test al, 0x08
     jz   .w2
 
+    cld
     mov  rcx, 256
     mov  dx,  0x1F0
     rep  insw
@@ -76,10 +71,6 @@ exfs_ata_read:
     pop  rax
     ret
 
-; -----------------------------------------------------------------------
-; exfs_ata_write — escribe 1 sector LBA28 desde [RSI]
-; Entrada: EAX = LBA, RSI = buffer fuente
-; -----------------------------------------------------------------------
 global exfs_ata_write
 exfs_ata_write:
     push rax
@@ -121,6 +112,7 @@ exfs_ata_write:
     test al, 0x08
     jz   .w2
 
+    cld
     mov  rcx, 256
     mov  dx,  0x1F0
     rep  outsw
@@ -140,9 +132,6 @@ exfs_ata_write:
     pop  rax
     ret
 
-; -----------------------------------------------------------------------
-; exfs_init — verifica SuperBlock; formatea si no existe
-; -----------------------------------------------------------------------
 global exfs_init
 exfs_init:
     push rax
@@ -181,9 +170,6 @@ exfs_init:
     pop  rax
     ret
 
-; -----------------------------------------------------------------------
-; exfs_format_disk — escribe SuperBlock + tabla XOBJ vacia + raiz "|"
-; -----------------------------------------------------------------------
 exfs_format_disk:
     push rax
     push rbx
@@ -210,7 +196,6 @@ exfs_format_disk:
     lea  rsi, [rel exfs_io_buf]
     call exfs_ata_write
 
-    ; Limpiar 32 sectores de tabla XOBJ
     lea  rdi, [rel exfs_io_buf]
     xor  rax, rax
     mov  rcx, 512/8
@@ -225,7 +210,6 @@ exfs_format_disk:
     inc  rbx
     loop .cls
 
-    ; XOBJ[0] = directorio raiz "|"
     lea  rdi, [rel exfs_io_buf]
     xor  rax, rax
     mov  rcx, 512/8
@@ -250,12 +234,8 @@ exfs_format_disk:
     pop  rax
     ret
 
-; -----------------------------------------------------------------------
-; exfs_find_obj — busca XOBJ por nombre en el directorio actual
-; Entrada: RSI = nombre buscado, RCX = tipo esperado (0 = cualquiera)
-; Salida:  RAX = indice global (-1 si no encontrado)
-;          RBX = LBA del sector, RDX = indice dentro del sector
-; -----------------------------------------------------------------------
+; exfs_find_obj — RSI=nombre, RCX=tipo (0=cualquiera)
+; RAX=indice global (-1 si no existe), RBX=LBA sector, RDX=indice en sector
 global exfs_find_obj
 exfs_find_obj:
     push r8
@@ -339,9 +319,6 @@ exfs_find_obj:
     pop  r8
     ret
 
-; -----------------------------------------------------------------------
-; exfs_alloc_slot — primer slot XOBJ libre. RAX=LBA sector, RDX=indice, CF=lleno
-; -----------------------------------------------------------------------
 exfs_alloc_slot:
     push rbx
     push rcx
@@ -391,9 +368,6 @@ exfs_alloc_slot:
     pop  rbx
     ret
 
-; -----------------------------------------------------------------------
-; exfs_alloc_block — primer LBA de datos libre. Salida: EAX = LBA
-; -----------------------------------------------------------------------
 exfs_alloc_block:
     push rbx
     push rcx
@@ -444,10 +418,7 @@ exfs_alloc_block:
     pop  rbx
     ret
 
-; -----------------------------------------------------------------------
-; exfs_make_obj — crea XOBJ en directorio actual
-; Entrada: RSI = nombre, BL = tipo. Salida: RAX = 0 OK, -1 sin espacio, -2 existe
-; -----------------------------------------------------------------------
+; exfs_make_obj — RSI=nombre, BL=tipo. RAX=0 OK, -1 sin espacio, -2 existe
 global exfs_make_obj
 exfs_make_obj:
     push rbx
@@ -469,9 +440,7 @@ exfs_make_obj:
     call exfs_alloc_slot
     jc   .nospace
 
-    ; RAX = LBA sector, RDX = indice
-    mov  ebx, eax            ; guardar LBA sector en ebx
-    mov  eax, eax
+    mov  ebx, eax
     lea  rdi, [rel exfs_io_buf]
     call exfs_ata_read
 
@@ -499,8 +468,6 @@ exfs_make_obj:
     rep  movsb
     mov  byte [rdi], 0
 
-    ; retroceder rdi hasta el inicio del XOBJ (0x04 + hasta 31 bytes copiados)
-    ; recalcular puntero base es mas simple releyendo desde exfs_io_buf
     mov  rax, rdx
     shl  rax, 6
     lea  rdi, [rel exfs_io_buf]
@@ -534,9 +501,6 @@ exfs_make_obj:
     pop  rbx
     ret
 
-; -----------------------------------------------------------------------
-; exfs_list_dir — lista objetos del directorio actual en pantalla
-; -----------------------------------------------------------------------
 global exfs_list_dir
 exfs_list_dir:
     push rax
@@ -627,10 +591,6 @@ exfs_list_dir:
     pop  rax
     ret
 
-; -----------------------------------------------------------------------
-; exfs_read_obj_data — lee contenido de un XOBJ. RSI=nombre, RDI=buffer destino
-; Salida: RAX = bytes leidos, -1 si no existe
-; -----------------------------------------------------------------------
 global exfs_read_obj_data
 exfs_read_obj_data:
     push rbx
@@ -655,8 +615,8 @@ exfs_read_obj_data:
     lea  rsi, [rel exfs_io_buf]
     add  rsi, rax
 
-    mov  eax, [rsi + 0x28]     ; start_lba
-    mov  ecx, [rsi + 0x24]     ; size
+    mov  eax, [rsi + 0x28]
+    mov  ecx, [rsi + 0x24]
 
     mov  rdi, r12
     call exfs_ata_read
@@ -675,10 +635,6 @@ exfs_read_obj_data:
     pop  rbx
     ret
 
-; -----------------------------------------------------------------------
-; exfs_write_obj_data — escribe datos en XOBJ
-; RSI=nombre, RDI=buffer fuente, RCX=longitud. Salida: RAX=0 OK, -1 error
-; -----------------------------------------------------------------------
 global exfs_write_obj_data
 exfs_write_obj_data:
     push rbx
@@ -706,14 +662,14 @@ exfs_write_obj_data:
     lea  rdi, [rel exfs_io_buf]
     add  rdi, rax
 
-    mov  eax, [rdi + 0x28]     ; start_lba (bloque de datos)
-    mov  [rdi + 0x24], r13d    ; actualizar size
+    mov  eax, [rdi + 0x28]
+    mov  [rdi + 0x24], r13d
 
-    push rax                   ; guardar start_lba
-    mov  eax, ebx               ; LBA del sector XOBJ
+    push rax
+    mov  eax, ebx
     lea  rsi, [rel exfs_io_buf]
     call exfs_ata_write
-    pop  rax                    ; recuperar start_lba
+    pop  rax
 
     mov  rsi, r12
     call exfs_ata_write
@@ -733,9 +689,8 @@ exfs_write_obj_data:
     pop  rbx
     ret
 
-; -----------------------------------------------------------------------
-; exfs_delete_obj — marca un XOBJ como libre. RSI=nombre. RAX=0 OK, -1 no existe
-; -----------------------------------------------------------------------
+; exfs_delete_obj — RSI=nombre. RAX=0 OK, -1 no existe.
+; Unico y generico: no distingue archivo vs directorio, como se pidio.
 global exfs_delete_obj
 exfs_delete_obj:
     push rbx
