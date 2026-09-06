@@ -25,8 +25,8 @@ src/templates ── XEXE: Executable binary standard with a 16-byte header.
 To clone the complete repository together with all of its components and set up the development environment, run the following commands in your terminal:
 
 # 1. Clone the master repository and download all submodules in a single step
-git clone --recursive https://github.com/Autruxalos/XASMOS.git
-cd XASMOS
+git clone --recursive https://github.com/autruxalos/xasmos.git
+cd xasmos
 
 # 2. Build the complete disk image and install the EXFS sectors
 make image
