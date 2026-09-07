@@ -590,4 +590,4 @@ xk_strncpy:
 ; =============================================================================
 %include "src/drivers/exfs.asm"
 %include "src/init/exit.asm"
-%include "src/apps/xsh/xsh.asm"
+%include "src/apps/xsh.asm"
