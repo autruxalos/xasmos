@@ -65,18 +65,18 @@ cmd_table:
     dq str_cmd_halt,       xsh_cmd_halt
     dq 0, 0
 
-str_cmd_ver:        db 'help', 0
+str_cmd_ver:        db 'ver', 0
 str_cmd_clear:      db 'clear', 0
 str_cmd_list:       db 'list', 0
-str_cmd_make_dir:   db 'mkdir', 0
-str_cmd_make_file:  db 'touch', 0
+str_cmd_make_dir:   db 'make', 0
+str_cmd_make_file:  db 'make', 0
 str_cmd_remove:     db 'remove', 0
-str_cmd_read:       db 'cat', 0
+str_cmd_read:       db 'read', 0
 str_cmd_write:      db 'write', 0
-str_cmd_ubicate:    db 'cd', 0
-str_cmd_whereami:   db 'pwd', 0
-str_cmd_sprusr:     db 'sudo', 0
-str_cmd_exofetch:   db 'sysinfo', 0
+str_cmd_ubicate:    db 'ubicate', 0
+str_cmd_whereami:   db 'whereami', 0
+str_cmd_sprusr:     db 'sprusr', 0
+str_cmd_exofetch:   db 'exofetch', 0
 str_cmd_halt:       db 'halt', 0
 
 ; -----------------------------------------------------------------------
