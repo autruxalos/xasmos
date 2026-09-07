@@ -61,7 +61,7 @@ KERNEL_DEPS = $(KERNEL_SRC) \
               $(SRC_DIR)/apps/xsh/whereami.asm \
               $(SRC_DIR)/apps/xsh/sprusr.asm \
               $(SRC_DIR)/apps/xsh/halt.asm \
-              $(SRC_DIR)/apps/xsh/exofetch/exofetch.asm
+              $(SRC_DIR)/apps/xsh/exofetch.asm
 
 # Binarios
 BOOT_BIN   = $(BIN_DIR)/exord.bin
