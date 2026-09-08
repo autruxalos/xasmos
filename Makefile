@@ -45,25 +45,24 @@ KERNEL_SRC = $(SRC_DIR)/kernel/xkernel.asm
 # Dependencias del kernel (orden importa para NASM %include)
 # Los comandos modulares van ANTES de xsh.asm
 KERNEL_DEPS = $(KERNEL_SRC) \
-              $(SRC_DIR)/drivers/exfs.asm \
-              $(SRC_DIR)/init/exit.asm \
-              
-			  $(SRC_DIR)/apps/xsh/ver.asm \
-              $(SRC_DIR)/apps/xsh/clear.asm \
-              $(SRC_DIR)/apps/xsh/list.asm \
-              $(SRC_DIR)/apps/xsh/make.asm \
-              $(SRC_DIR)/apps/xsh/remove.asm \
-              $(SRC_DIR)/apps/xsh/read.asm \
-              $(SRC_DIR)/apps/xsh/write.asm \
-              $(SRC_DIR)/apps/xsh/locate.asm \
-              $(SRC_DIR)/apps/xsh/whereami.asm \
-              $(SRC_DIR)/apps/xsh/ubicate.asm \
-              $(SRC_DIR)/apps/xsh/sprusr.asm \
-              $(SRC_DIR)/apps/xsh/halt.asm \
-              $(SRC_DIR)/apps/xsh/exofetch.asm \
-              
-			  $(SRC_DIR)/apps/xsh.asm
+			%include "src/drivers/exfs.asm"
+%include "src/init/exit.asm"
 
+%include "src/apps/xsh/ver.asm"
+%include "src/apps/xsh/clear.asm"
+%include "src/apps/xsh/list.asm"
+%include "src/apps/xsh/make.asm"
+%include "src/apps/xsh/remove.asm"
+%include "src/apps/xsh/read.asm"
+%include "src/apps/xsh/write.asm"
+%include "src/apps/xsh/locate.asm"
+%include "src/apps/xsh/whereami.asm"
+%include "src/apps/xsh/ubicate.asm"
+%include "src/apps/xsh/sprusr.asm"
+%include "src/apps/xsh/halt.asm"
+%include "src/apps/xsh/exofetch.asm"
+
+%include "src/apps/xsh.asm"
 # Binarios
 BOOT_BIN   = $(BIN_DIR)/exord.bin
 KERNEL_BIN = $(BIN_DIR)/xkernel.bin
