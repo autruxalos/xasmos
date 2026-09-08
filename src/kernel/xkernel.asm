@@ -590,4 +590,19 @@ xk_strncpy:
 ; =============================================================================
 %include "src/drivers/exfs.asm"
 %include "src/init/exit.asm"
+
+%include "src/apps/xsh/ver.asm"
+%include "src/apps/xsh/clear.asm"
+%include "src/apps/xsh/list.asm"
+%include "src/apps/xsh/make.asm"
+%include "src/apps/xsh/remove.asm"
+%include "src/apps/xsh/read.asm"
+%include "src/apps/xsh/write.asm"
+%include "src/apps/xsh/locate.asm"
+%include "src/apps/xsh/whereami.asm"
+%include "src/apps/xsh/ubicate.asm"
+%include "src/apps/xsh/sprusr.asm"
+%include "src/apps/xsh/halt.asm"
+%include "src/apps/xsh/exofetch.asm"
+
 %include "src/apps/xsh.asm"
