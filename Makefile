@@ -47,7 +47,8 @@ KERNEL_SRC = $(SRC_DIR)/kernel/xkernel.asm
 KERNEL_DEPS = $(KERNEL_SRC) \
               $(SRC_DIR)/drivers/exfs.asm \
               $(SRC_DIR)/init/exit.asm \
-              $(SRC_DIR)/apps/xsh/ver.asm \
+              
+			  $(SRC_DIR)/apps/xsh/ver.asm \
               $(SRC_DIR)/apps/xsh/clear.asm \
               $(SRC_DIR)/apps/xsh/list.asm \
               $(SRC_DIR)/apps/xsh/make.asm \
@@ -60,7 +61,8 @@ KERNEL_DEPS = $(KERNEL_SRC) \
               $(SRC_DIR)/apps/xsh/sprusr.asm \
               $(SRC_DIR)/apps/xsh/halt.asm \
               $(SRC_DIR)/apps/xsh/exofetch.asm \
-              $(SRC_DIR)/apps/xsh.asm
+              
+			  $(SRC_DIR)/apps/xsh.asm
 
 # Binarios
 BOOT_BIN   = $(BIN_DIR)/exord.bin
