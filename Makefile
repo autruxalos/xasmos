@@ -1,16 +1,13 @@
 # =============================================================================
-# XASMOS Makefile -- Wayward Kernel + Sourcephilia Integration
+# XASMOS Makefile -- Wayward Kernel + Sourcephilia
 # =============================================================================
 # Uso:
-#   make              -- compila imagen de disco completa (DEBUG=0)
-#   make run          -- ejecuta en QEMU
-#   make clean        -- limpia binarios
-#   make info         -- muestra tama?os
-#   DEBUG=1 make      -- con s?mbolos de depuraci?n NASM
-#
-# Sourcephilia integration:
-#   make bootstrap    -- prepara estructura para sourcephilia
-#   make sources      -- descarga fuentes de paquetes (stub)
+#   make              Compilar imagen de disco
+#   make run          Ejecutar en QEMU
+#   make clean        Limpiar binarios
+#   make info         Mostrar tamaños
+#   DEBUG=1 make      Compilar con símbolos de depuración
+#   make bootstrap    Preparar estructura Sourcephilia
 # =============================================================================
 
 # Herramientas
@@ -22,8 +19,8 @@ ifeq ($(DEBUG),1)
     ASMFLAGS += -g
 endif
 
-# Detecci?n de arquitectura local (para compilaci?n de paquetes sourcephilia)
-UNAME_M   = $(shell uname -m)
+# Detección de arquitectura local (Sourcephilia)
+UNAME_M = $(shell uname -m)
 ifeq ($(UNAME_M),x86_64)
     LOCAL_ARCH = x86-64
 else ifeq ($(UNAME_M),i686)
@@ -35,21 +32,21 @@ else
 endif
 
 # Directorios
-SRC_DIR       = src
-BIN_DIR       = bin
-BUILD_DIR     = build
-PKG_DIR       = packages
-SOURCEPHILIA  = $(PKG_DIR)/sourcephilia
+SRC_DIR      = src
+BIN_DIR      = bin
+BUILD_DIR    = build
+PKG_DIR      = packages
+SOURCEPHILIA = $(PKG_DIR)/sourcephilia
 
-# Archivos fuente
+# Archivos fuente principales
 BOOT_SRC   = $(SRC_DIR)/boot/exord.asm
 KERNEL_SRC = $(SRC_DIR)/kernel/xkernel.asm
 
-# Dependencias del kernel (todo lo que se %include en xkernel.asm)
+# Dependencias del kernel (orden importa para NASM %include)
+# Los comandos modulares van ANTES de xsh.asm
 KERNEL_DEPS = $(KERNEL_SRC) \
               $(SRC_DIR)/drivers/exfs.asm \
               $(SRC_DIR)/init/exit.asm \
-              $(SRC_DIR)/apps/xsh.asm \
               $(SRC_DIR)/apps/xsh/ver.asm \
               $(SRC_DIR)/apps/xsh/clear.asm \
               $(SRC_DIR)/apps/xsh/list.asm \
@@ -59,111 +56,114 @@ KERNEL_DEPS = $(KERNEL_SRC) \
               $(SRC_DIR)/apps/xsh/write.asm \
               $(SRC_DIR)/apps/xsh/locate.asm \
               $(SRC_DIR)/apps/xsh/whereami.asm \
+              $(SRC_DIR)/apps/xsh/ubicate.asm \
               $(SRC_DIR)/apps/xsh/sprusr.asm \
               $(SRC_DIR)/apps/xsh/halt.asm \
-              $(SRC_DIR)/apps/xsh/exofetch.asm
+              $(SRC_DIR)/apps/xsh/exofetch.asm \
+              $(SRC_DIR)/apps/xsh.asm
 
 # Binarios
 BOOT_BIN   = $(BIN_DIR)/exord.bin
 KERNEL_BIN = $(BIN_DIR)/xkernel.bin
-IMAGE      = xos.img
+IMAGE      = xasmos.img
 
-# Configuraci?n de imagen
+# Configuración de imagen
 IMAGE_SECTORS = 8192
 SECTOR_SIZE   = 512
+MAX_KERNEL_BYTES = $$((64 * $(SECTOR_SIZE)))
 
 # QEMU
-QEMU       = qemu-system-x86_64
-QEMUFLAGS  = -m 64M -no-reboot -no-shutdown
+QEMU      = qemu-system-x86_64
+QEMUFLAGS = -m 64M -no-reboot -no-shutdown
 
 # Targets
-.PHONY: all run clean info bootstrap sources help
+.PHONY: all run clean info bootstrap sources help disasm
 
 help:
 	@echo "XASMOS Makefile -- Wayward Kernel"
 	@echo ""
-	@echo "Targets b?sicos:"
-	@echo "  make              Compilar imagen de disco"
-	@echo "  make run          Ejecutar en QEMU"
-	@echo "  make clean        Limpiar binarios"
-	@echo "  make info         Mostrar tama?os"
+	@echo "Basic targets:"
+	@echo "  make              Build disk image"
+	@echo "  make run          Run in QEMU"
+	@echo "  make clean        Clean binaries"
+	@echo "  make info         Show sizes"
 	@echo ""
-	@echo "Sourcephilia (gestor de paquetes):"
-	@echo "  make bootstrap    Preparar estructura para sourcephilia"
+	@echo "Sourcephilia:"
+	@echo "  make bootstrap    Prepare package structure"
 	@echo ""
-	@echo "Opciones:"
-	@echo "  DEBUG=1 make      Compilar con s?mbolos de depuraci?n"
-	@echo "  ARCH=armv7h make  Target espec?fico (stub, falta implementar)"
+	@echo "Options:"
+	@echo "  DEBUG=1 make      Build with debug symbols"
 
 all: $(IMAGE)
 
 $(BIN_DIR):
 	@mkdir -p $(BIN_DIR)
 
+# --- EXORD (bootloader) ---
+$(BOOT_BIN): $(BOOT_SRC) | $(BIN_DIR)
+	@echo "[NASM] EXORD Bootloader ($(BOOT_SRC))"
+	@$(ASM) $(ASMFLAGS) $(BOOT_SRC) -o $(BOOT_BIN)
+	@sz=$$(wc -c < $(BOOT_BIN)); \
+	if [ $$sz -ne 512 ]; then \
+		echo "ERROR: EXORD must be exactly 512 bytes (got $$sz)"; exit 1; \
+	fi
+	@echo "      OK (512 bytes)"
+
+# --- Wayward Kernel ---
 $(KERNEL_BIN): $(KERNEL_DEPS) | $(BIN_DIR)
 	@echo "[NASM] Wayward Kernel ($(KERNEL_SRC))"
 	@$(ASM) $(ASMFLAGS) $(KERNEL_SRC) -o $(KERNEL_BIN)
 	@if [ ! -f $(KERNEL_BIN) ]; then \
-		echo "ERROR: no se gener? $(KERNEL_BIN)"; exit 1; \
+		echo "ERROR: $(KERNEL_BIN) was not generated"; exit 1; \
 	fi
 	@sz=$$(wc -c < $(KERNEL_BIN)); \
-	if [ $$sz -gt $$(( 64 * $(SECTOR_SIZE) )) ]; then \
-		echo "ERROR: Kernel demasiado grande ($$sz bytes, m?x 32KB)"; exit 1; \
+	if [ $$sz -gt $(MAX_KERNEL_BYTES) ]; then \
+		echo "ERROR: Kernel too large ($$sz bytes, max $(MAX_KERNEL_BYTES))"; exit 1; \
 	fi
 	@echo "      OK ($$(wc -c < $(KERNEL_BIN)) bytes)"
 
-$(BOOT_BIN): $(BOOT_SRC) | $(BIN_DIR)
-	@echo "[NASM] Exord Bootloader ($(BOOT_SRC))"
-	@$(ASM) $(ASMFLAGS) $(BOOT_SRC) -o $(BOOT_BIN)
-	@sz=$$(wc -c < $(BOOT_BIN)); \
-	if [ $$sz -ne 512 ]; then \
-		echo "ERROR: Exord debe ser exactamente 512 bytes (tiene $$sz)"; exit 1; \
-	fi
-	@echo "      OK (512 bytes)"
-
+# --- Disk image ---
 $(IMAGE): $(BOOT_BIN) $(KERNEL_BIN)
-	@echo "[IMG] Creating disc xasmos.img ($(IMAGE_SECTORS) sectores)..."
+	@echo "[IMG] Creating $(IMAGE) ($(IMAGE_SECTORS) sectors)..."
 	@dd if=/dev/zero of=$(IMAGE) bs=$(SECTOR_SIZE) count=$(IMAGE_SECTORS) status=none
 	@dd if=$(BOOT_BIN) of=$(IMAGE) bs=$(SECTOR_SIZE) seek=0 count=1 conv=notrunc status=none
 	@dd if=$(KERNEL_BIN) of=$(IMAGE) bs=$(SECTOR_SIZE) seek=1 conv=notrunc status=none
-	@echo "[OK] Imagen lista: $(IMAGE)"
+	@echo "[OK] Image ready: $(IMAGE)"
 
 run: $(IMAGE)
-	@echo "[QEMU] Iniciando..."
+	@echo "[QEMU] Starting xasmos..."
 	$(QEMU) -drive format=raw,file=$(IMAGE),if=ide,media=disk $(QEMUFLAGS) -display sdl
 
 info:
-	@echo "=== Tama?os ==="
-	@echo "Exord:   $$([ -f $(BOOT_BIN) ] && wc -c < $(BOOT_BIN) || echo 'no compilado') bytes"
-	@echo "Kernel:  $$([ -f $(KERNEL_BIN) ] && wc -c < $(KERNEL_BIN) || echo 'no compilado') bytes"
-	@echo "Imagen:  $$([ -f $(IMAGE) ] && wc -c < $(IMAGE) || echo 'no existe') bytes"
+	@echo "=== Sizes ==="
+	@echo "EXORD:   $$([ -f $(BOOT_BIN) ] && wc -c < $(BOOT_BIN) || echo 'not built') bytes"
+	@echo "Kernel:  $$([ -f $(KERNEL_BIN) ] && wc -c < $(KERNEL_BIN) || echo 'not built') bytes"
+	@echo "Image:   $$([ -f $(IMAGE) ] && wc -c < $(IMAGE) || echo 'missing') bytes"
 	@echo ""
-	@echo "Arquitectura local detectada: $(LOCAL_ARCH)"
+	@echo "Local architecture: $(LOCAL_ARCH)"
 
 clean:
-	@echo "[CLEAN] Eliminando binarios..."
+	@echo "[CLEAN] Removing binaries..."
 	@rm -rf $(BIN_DIR) $(IMAGE) $(BUILD_DIR)
 	@echo "      OK"
 
 # =========================================================================
-# SOURCEPHILIA: Gestor de paquetes compilados desde fuente
+# SOURCEPHILIA
 # =========================================================================
 
 bootstrap: | $(BIN_DIR)
-	@echo "[SOURCEPHILIA] Preparando estructura..."
+	@echo "[SOURCEPHILIA] Preparing structure..."
 	@mkdir -p $(SOURCEPHILIA)/{recipes,cache,$(LOCAL_ARCH)}
-	@echo "      OK (estructura en $(SOURCEPHILIA))"
+	@echo "      OK ($(SOURCEPHILIA))"
 
 sources:
 	@echo "[SOURCEPHILIA] Stub: download sources (not implemented yet)"
-	@echo "              This is where: curl, git clone, checksum verification, etc. goes"
 
 # =========================================================================
-# Debug targets (future)
+# Debug
 # =========================================================================
 
-disasm:
-	@echo "[DISASM] Generando listado de Exord..."
+disasm: $(BOOT_BIN)
+	@echo "[DISASM] EXORD listing..."
 	@ndisasm -b 16 $(BOOT_BIN) > exord.dis
-	@wc -l exord.dis
-	@echo "        (archivo: exord.dis)"
+	@echo "      Written to exord.dis ($$(wc -l < exord.dis) lines)"
