@@ -1,14 +1,12 @@
-; =============================================================================
-; pwd — displays current directory [modular XSH command]
-; =============================================================================
 [BITS 64]
-
+global xsh_cmd_whereami
 xsh_cmd_whereami:
-    mov  bl, 0x0B
-    mov  rsi, msg_pipe
+    mov bl, 0x0B
+    mov rsi, .pipe
     call xk_print
-    lea  rsi, [rel xsh_cwd_name]
+    lea rsi, [rel xsh_cwd_name]
     call xk_print
-    mov  rsi, msg_pipe
+    mov rsi, .pipe
     call xk_println
     ret
+.pipe db '|', 0
