@@ -4,7 +4,7 @@ XASMOS is an experimental high-performance exokernel operating system written en
 
 📐 Path Specification: SuperDirs (|)
 
-XASMOS completely rejects the legacy UNIX (/) and DOS (\) path standards. Instead, the EXFS file system introduces the SuperDir concept, using the vertical bar | as a unified path delimiter.
+XASMOS completely rejects the legacy UNIX ( / ) and DOS ( \ ) path standards. Instead, the EXFS file system introduces the SuperDir concept, using the vertical bar | as a unified path delimiter.
 
 System Syntax Rules
 Linear Structure: Paths follow the format |directory|file.asm
