@@ -375,12 +375,12 @@ xk_putchar:
     call xk_scroll
     jmp  .done
 .mirror:
-    ; cursor_pos como espejo de compatibilidad (row*80+col), sin DIV
     movzx rax, byte [cursor_row]
     imul  rax, VGA_COLS
     movzx rcx, byte [cursor_col]
     add   rax, rcx
     mov   word [cursor_pos], ax
+    call  xk_update_hw_cursor          ; <-- agregar esta línea
 
 .done:
     pop rdi
