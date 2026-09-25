@@ -20,7 +20,7 @@ src/kernel/drivers/exfs ── EXFS: Inode-free file system driver.
 src/init ── EXIT: User-space initialization process.
 src/apps ── XSH: Exokernel shell implementing the | prompt.
 src/templates ── XEXE: Executable binary standard with a 16-byte header.
-🚀 Installation and Build on Linux/Unix (preferably void linux)
+## 🚀 Installation and Build on Linux/Unix (preferably void linux)
 
 To clone the complete repository together with all of its components and set up the development environment, run the following commands in your terminal:
 
