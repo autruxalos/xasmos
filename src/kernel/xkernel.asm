@@ -390,6 +390,31 @@ xk_putchar:
     pop rax
     ret
 
+global xk_update_hw_cursor
+xk_update_hw_cursor:
+    push rax
+    push rdx
+
+    movzx eax, word [cursor_pos]
+
+    mov dx, 0x3D4
+    mov al, 0x0F
+    out dx, al
+    mov dx, 0x3D5
+    mov al, byte [cursor_pos]
+    out dx, al
+
+    mov dx, 0x3D4
+    mov al, 0x0E
+    out dx, al
+    mov dx, 0x3D5
+    mov al, byte [cursor_pos+1]
+    out dx, al
+
+    pop rdx
+    pop rax
+    ret
+
 ; xk_print — RSI = string null-terminated, BL = atributo
 global xk_print
 xk_print:
