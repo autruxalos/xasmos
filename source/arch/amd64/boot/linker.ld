@@ -1,9 +1,9 @@
-OUTPUT_FORMAT(binary)
 ENTRY(_start)
 
 SECTIONS
 {
-    . = 0x100000;
+    /* Load the kernel cleanly at 1MB (1M) */
+    . = 1M;
 
     .multiboot : {
         *(.multiboot)
