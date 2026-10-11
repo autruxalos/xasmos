@@ -8,7 +8,7 @@ The **names** below are separate from the code license and are claimed as
 project trademarks by Autruxalos, the original author:
 
 - XASMOS
-- Wayward (the kernel)
+- Xeret (the kernel)
 - Exord (the bootloader)
 - Alembic (the package manager)
 - XSH (the shell)
