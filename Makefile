@@ -119,3 +119,21 @@ $(IMAGE): $(KERNEL)
 	@echo "[OK] Installation image ready at $(IMAGE)"
 
 image: $(IMAGE)
+
+# --- Add this to your source files list ---
+KERNELLIB_SRC = source/arch/amd64/kernel/xeret/kernel_lib.c
+KERNELLIB_OBJ = bin/kernel_lib.o
+
+# --- Add this compilation rule ---
+$(KERNELLIB_OBJ): $(KERNELLIB_SRC) | bin
+	@echo "[CLANG] Compiling kernel I/O and utility library..."
+	$(CC) $(CFLAGS) -c $(KERNELLIB_SRC) -o $(KERNELLIB_OBJ)
+
+# --- Include $(KERNELLIB_OBJ) in the $(KERNEL) linking target rule ---
+$(KERNEL): $(BOOT_OBJ) $(MAIN_OBJ) $(MEM_OBJ) $(XQUEUE_OBJ) $(EXIT_OBJ) $(EXFS_OBJ) $(KERNELLIB_OBJ) $(PATH_OBJ) $(SHELL_OBJ) $(REMOVE_OBJ) $(FORM_OBJ) $(LDSCRIPT)
+	@echo "[LLD] Linking freestanding Xeret binary..."
+	$(LD) -T $(LDSCRIPT) \
+		$(BOOT_OBJ) $(MAIN_OBJ) $(MEM_OBJ) $(XQUEUE_OBJ) $(EXIT_OBJ) $(EXFS_OBJ) $(KERNELLIB_OBJ) \
+		$(PATH_OBJ) $(SHELL_OBJ) $(REMOVE_OBJ) $(FORM_OBJ) \
+		-o $(KERNEL)
+	@echo "[OK] Xeret kernel built successfully."
