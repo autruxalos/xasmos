@@ -107,3 +107,15 @@ run: $(KERNEL)
 clean:
 	@echo "[CLEAN] Removing build artifacts..."
 	rm -rf bin/
+
+# --- Installation Image Rule ---
+IMAGE = bin/xasmos.img
+
+$(IMAGE): $(KERNEL)
+	@echo "[IMAGE] Creating 64MB raw XASMOS installation disk..."
+	dd if=/dev/zero of=$(IMAGE) bs=1M count=64
+	@echo "[IMAGE] Writing Xeret (Merlin) kernel to disk blocks..."
+	dd if=$(KERNEL) of=$(IMAGE) bs=512 seek=2 conv=notrunc
+	@echo "[OK] Installation image ready at $(IMAGE)"
+
+image: $(IMAGE)
