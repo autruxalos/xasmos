@@ -15,9 +15,13 @@ System Syntax Rules
 This master repository links together the six essential peripheral projects through modular submodules:
 
 /boot ── EXORD: Master Boot Record (MBR) bootloader.
+
 /kernel/xeret ── XERET: Secure multiplexing kernel.
+
 /drivers/exfs ── EXFS: Inode-free file system driver.
+
 /init ── exit: User-space initialization process.
+
 /apps ── XSH: Exokernel shell implementing the | prompt.
 
 ## 🚀 Installation and Build on Linux/Unix (preferably void linux)
