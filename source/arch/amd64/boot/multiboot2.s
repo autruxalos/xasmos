@@ -1,5 +1,5 @@
 /* =============================================================================
- * XASMOS — Multiboot2 Minimal Header & PVH Note (LLVM-MC / GAS Syntax)
+ * XASMOS — Multiboot2 Minimal Header (LLVM-MC / GAS Syntax)
  * Path: source|arch|amd64|boot|multiboot2.s
  * ============================================================================= */
 .code32
@@ -16,16 +16,6 @@ header_start:
     .short 0
     .long 8
 header_end:
-
-/* PVH Note to allow direct loading via modern QEMU -kernel */
-.section .note.Xen, "a", @note
-    .long 4             /* Name size ("Xen" + null terminator) */
-    .long 8             /* Descriptor size (64-bit entry address) */
-    .long 18            /* Note type: XEN_ELFNOTE_PHYS32_ENTRY */
-    .asciz "Xen"        /* Vendor name */
-    .align 4
-    .quad _start        /* Kernel entry point address */
-    .align 4
 
 .section .text
 .global _start
