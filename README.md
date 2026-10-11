@@ -14,12 +14,12 @@ POSIX Independence: Eliminates the logical overhead of traditional file descript
 
 This master repository links together the six essential peripheral projects through modular submodules:
 
-src/boot ── EXORD: Master Boot Record (MBR) bootloader.
-src/kernel ── XKERNEL: Secure multiplexing kernel.
-src/kernel/drivers/exfs ── EXFS: Inode-free file system driver.
-src/init ── EXIT: User-space initialization process.
-src/apps ── XSH: Exokernel shell implementing the | prompt.
-src/templates ── XEXE: Executable binary standard with a 16-byte header.
+/boot ── EXORD: Master Boot Record (MBR) bootloader.
+/kernel/xeret ── XERET: Secure multiplexing kernel.
+/drivers/exfs ── EXFS: Inode-free file system driver.
+/init ── exit: User-space initialization process.
+/apps ── XSH: Exokernel shell implementing the | prompt.
+
 ## 🚀 Installation and Build on Linux/Unix (preferably void linux)
 
 To clone the complete repository together with all of its components and set up the development environment, run the following commands in your terminal:
