@@ -2,7 +2,7 @@
 
 XASMOS is an experimental high-performance exokernel operating system written entirely from scratch. This master repository brings together all of the ecosystem's independent modules into a single project.
 
-📐 Path Specification: SuperDirs (|)
+## 📐 Path Specification: SuperDirs (|)
 
 XASMOS completely rejects the legacy UNIX ( / ) and DOS ( \ ) path standards. Instead, the EXFS file system introduces the SuperDir concept, using the vertical bar "|" as a unified path delimiter.
 
