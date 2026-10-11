@@ -1,6 +1,6 @@
 # XASMOS - Native Exokernel Operating System
 
-XASMOS is an experimental high-performance exokernel operating system written entirely from scratch in 16-bit x86 Assembly. This master repository brings together all of the ecosystem's independent modules into a single project.
+XASMOS is an experimental high-performance exokernel operating system written entirely from scratch. This master repository brings together all of the ecosystem's independent modules into a single project.
 
 📐 Path Specification: SuperDirs (|)
 
