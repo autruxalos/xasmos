@@ -7,10 +7,16 @@ XASMOS is an experimental high-performance exokernel operating system written en
 XASMOS completely rejects the legacy UNIX ( / ) and DOS ( \ ) path standards. Instead, the EXFS file system introduces the SuperDir concept, using the vertical bar "|" as a unified path delimiter.
 
 System Syntax Rules
-### Linear Structure: Paths follow the format |directory|file.asm
-### Direct Mapping: When typing |apps|xsh, the kernel does not traverse a hierarchical directory tree on disk. Instead, it directly looks up the indexed token |system| in the global XOBJ object table. This reduces lookup time to constant-time complexity, $\mathcal{O}(1)$.
-### POSIX Independence: Eliminates the logical overhead of traditional file descriptors and complex operating system system calls.
-🗂️ Ecosystem Architecture
+### Linear Structure:
+Paths follow the format |directory|file.asm
+
+### Direct Mapping: 
+When typing |apps|xsh, the kernel does not traverse a hierarchical directory tree on disk. Instead, it directly looks up the indexed token |system| in the global XOBJ object table. This reduces lookup time to constant-time complexity, $\mathcal{O}(1)$.
+
+### POSIX Independence: 
+Eliminates the logical overhead of traditional file descriptors and complex operating system system calls.
+
+## 🗂️ Ecosystem Architecture
 
 This master repository links together the six essential peripheral projects through modular submodules:
 
