@@ -124,4 +124,14 @@ typedef struct {
     EFI_BOOT_SERVICES *BootServices;
 } EFI_SYSTEM_TABLE;
 
+/* --- Shared kernel handoff struct (single definition, used by efi_main.c
+ *     and fb_console.c / kernel_main.c -- never redeclare this elsewhere) --- */
+typedef struct {
+    UINT64 base;
+    UINT32 width;
+    UINT32 height;
+    UINT32 pixels_per_scanline;
+    UINT32 pixel_format;   /* matches EFI_GRAPHICS_PIXEL_FORMAT */
+} FramebufferInfo;
+
 #endif
