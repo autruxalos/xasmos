@@ -1,24 +1,20 @@
-// Inside source|arch|amd64|kernel|xeret|main.c:
+/******************************************************************************
+ * XASMOS - xeret entry point under UEFI (GOP framebuffer edition)
+ * Path: source|arch|amd64|kernel|xeret|main.c (UEFI variant)
+ ******************************************************************************/
+#include "efi_types.h"
 
-extern void physical_mem_init(unsigned long long total_ram_bytes);
-extern void exit_main_executor(void); // Declaring EXIT
+extern void fb_console_init(FramebufferInfo *fb);
+extern void xk_println(const char *str);
+/* extern void exit_main_executor(void);  -- wire in once shell is ported */
 
-void kernel_main(void) {
-    char *vga_buffer = (char*) 0xB8000;
-    const char *banner = "XASMOS MAINFRAME EXOKERNEL ONLINE";
-    
-    for (int i = 0; banner[i] != '\0'; i++) {
-        vga_buffer[i * 2]     = banner[i];
-        vga_buffer[i * 2 + 1] = 0x0F;
-    }
+void kernel_main(FramebufferInfo *fb) {
+    fb_console_init(fb);
 
-    // Initialize memory map (64MB baseline)
-    physical_mem_init(67108864ULL);
+    xk_println("XASMOS MAINFRAME EXOKERNEL -- xeret (UEFI/GOP)");
+    xk_println("Framebuffer online. Boot Services exited successfully.");
 
-    // Hand off control to EXIT (which launches XSH)
-    exit_main_executor();
+    /* exit_main_executor(); */
 
-    while (1) {
-        __asm__ volatile ("hlt");
-    }
+    for (;;) { __asm__ volatile ("hlt"); }
 }
