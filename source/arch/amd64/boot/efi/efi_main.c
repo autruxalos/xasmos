@@ -4,16 +4,8 @@
  ******************************************************************************/
 #include "efi_types.h"
 
-/* Framebuffer handoff struct passed to kernel_main. Kernel code (text
- * blitter, EXFS, etc.) must be rebuilt against this instead of 0xB8000. */
-typedef struct {
-    UINT64 base;
-    UINT32 width;
-    UINT32 height;
-    UINT32 pixels_per_scanline;
-    UINT32 pixel_format;   /* matches EFI_GRAPHICS_PIXEL_FORMAT */
-} FramebufferInfo;
-
+/* FramebufferInfo is defined once, in efi_types.h -- shared with
+ * fb_console.c and kernel_main.c so the layout can never drift apart. */
 extern void kernel_main(FramebufferInfo *fb);
 
 static EFI_GUID gopGuid = EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID;
