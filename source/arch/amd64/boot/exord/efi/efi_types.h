@@ -1,9 +1,6 @@
 /******************************************************************************
- * XASMOS - Minimal UEFI types + kernel handoff (no EDK2)
- * Path: source|arch|amd64|boot|exord|efi|efi_types.h
- *
- * Single source of truth for FramebufferInfo and XeretHandoff.
- * Never redeclare these structs elsewhere.
+ * XASMOS - Minimal UEFI types + XeretHandoff (no EDK2)
+ * Path: source/arch/amd64/boot/exord/efi/efi_types.h
  ******************************************************************************/
 #ifndef XASMOS_EFI_TYPES_H
 #define XASMOS_EFI_TYPES_H
@@ -32,7 +29,6 @@ typedef struct {
     UINT8  Data4[8];
 } EFI_GUID;
 
-/* --- Graphics Output Protocol --- */
 typedef struct {
     UINT32 RedMask, GreenMask, BlueMask, ReservedMask;
 } EFI_PIXEL_BITMASK;
@@ -76,17 +72,15 @@ typedef struct EFI_GRAPHICS_OUTPUT_PROTOCOL {
 #define EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID \
     { 0x9042a9de, 0x23dc, 0x4a38, { 0x96, 0xfb, 0x7a, 0xde, 0xd0, 0x80, 0x51, 0x6a } }
 
-/* --- Memory map --- */
 typedef struct {
     UINT32 Type;
     UINT32 Pad;
     UINT64 PhysicalStart;
     UINT64 VirtualStart;
-    UINT64 NumberOfPages;   /* 4 KiB pages in UEFI convention */
+    UINT64 NumberOfPages;
     UINT64 Attribute;
 } EFI_MEMORY_DESCRIPTOR;
 
-/* UEFI memory types we care about for the physical bitmap */
 #define EfiReservedMemoryType       0
 #define EfiLoaderCode               1
 #define EfiLoaderData               2
@@ -112,8 +106,60 @@ typedef struct {
 } EFI_TABLE_HEADER;
 
 /*
- * EFI_BOOT_SERVICES layout (UEFI 2.x indices after Hdr):
- *   0-3   RaiseTPL .. FreePages
- *   4     GetMemoryMap
- *   5-6   AllocatePool, FreePool
- *   7-25  Create
+ * Boot Services after Hdr: 0-3 TPL/pages, 4 GetMemoryMap, 5-6 pool,
+ * 7-25 events..UnloadImage, 26 ExitBootServices, 27-36 ..., 37 LocateProtocol
+ */
+typedef struct EFI_BOOT_SERVICES {
+    EFI_TABLE_HEADER Hdr;
+    void *_pad_a[4];
+    EFI_STATUS (EFIAPI *GetMemoryMap)(UINTN *MemoryMapSize,
+                                      EFI_MEMORY_DESCRIPTOR *MemoryMap,
+                                      UINTN *MapKey,
+                                      UINTN *DescriptorSize,
+                                      UINT32 *DescriptorVersion);
+    void *_pad_b[2];
+    void *_pad_c[19];
+    EFI_STATUS (EFIAPI *ExitBootServices)(EFI_HANDLE ImageHandle, UINTN MapKey);
+    void *_pad_d[10];
+    EFI_STATUS (EFIAPI *LocateProtocol)(EFI_GUID *Protocol,
+                                        void *Registration,
+                                        void **Interface);
+} EFI_BOOT_SERVICES;
+
+typedef struct {
+    EFI_TABLE_HEADER   Hdr;
+    CHAR16            *FirmwareVendor;
+    UINT32             FirmwareRevision;
+    EFI_HANDLE         ConsoleInHandle;
+    void              *ConIn;
+    EFI_HANDLE         ConsoleOutHandle;
+    void              *ConOut;
+    EFI_HANDLE         StandardErrorHandle;
+    void              *StdErr;
+    void              *RuntimeServices;
+    EFI_BOOT_SERVICES *BootServices;
+} EFI_SYSTEM_TABLE;
+
+typedef struct {
+    UINT64 base;
+    UINT32 width;
+    UINT32 height;
+    UINT32 pixels_per_scanline;
+    UINT32 pixel_format;
+} FramebufferInfo;
+
+#define XERET_HANDOFF_MAGIC  0x5845524554484E44ULL
+#define XERET_MMAP_MAX_BYTES 65536
+
+typedef struct {
+    UINT64              magic;
+    FramebufferInfo     fb;
+    UINT64              mmap_addr;
+    UINT64              mmap_size;
+    UINT64              mmap_desc_size;
+    UINT32              mmap_desc_version;
+    UINT32              _pad;
+    UINT64              phys_end;
+} XeretHandoff;
+
+#endif /* XASMOS_EFI_TYPES_H */
