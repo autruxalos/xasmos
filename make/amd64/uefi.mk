@@ -24,3 +24,22 @@ $(BUILD)/obj/%.o: $(SRC_DIR)/%.c
 $(EFI_OUT): $(OBJS)
 	@mkdir -p $(dir $@)
 	lld-link /subsystem:efi_application /entry:efi_main /nodefaultlib /out:$@ $(OBJS)
+
+.PHONY: efi clean run
+
+efi: $(EFI_OUT)
+
+clean:
+	rm -rf $(BUILD)
+
+IMG  := $(BUILD)/esp.img
+OVMF ?= /usr/share/edk2/x64/OVMF.4m.fd
+
+$(IMG): $(EFI_OUT)
+	dd if=/dev/zero of=$@ bs=1M count=64 status=none
+	mkfs.fat -F 32 $@ >/dev/null
+	mmd   -i $@ ::/EFI ::/EFI/BOOT
+	mcopy -i $@ $(EFI_OUT) ::/EFI/BOOT/BOOTX64.EFI
+
+run: $(IMG)
+	qemu-system-x86_64 -bios $(OVMF) -drive format=raw,file=$(IMG) -m 256M
