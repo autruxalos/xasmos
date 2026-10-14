@@ -50,7 +50,7 @@ UINT64 xpt_pml4_phys(void) {
  *
  * We only cover what phys_end requires; no speculative map of the full 256 TiB.
  */
-int xpt_init_identity(UINT64 phys_end) {
+int xpt_init_identity(UINT64 phys_end, UINT64 extra_base, UINT64 extra_size) {
     UINT64 pml4_phys, pdpt_phys, pd_phys;
     volatile UINT64 *pml4, *pdpt, *pd;
     UINT64 mapped_end, addr;
