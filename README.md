@@ -30,7 +30,7 @@ This master repository links together the six essential peripheral projects thro
 
 /apps ── XSH: Exokernel shell implementing the | prompt.
 
-## 🚀 Installation and Build on Linux/Unix (preferably void linux)
+## 🚀 Installation and Build on Linux/Unix (preferably linux)
 
 To clone the complete repository together with all of its components and set up the development environment, run the following commands in your terminal:
 
