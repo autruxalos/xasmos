@@ -6,8 +6,8 @@
  * Slot index in high 32 bits of the token; generation in low 32 bits
  * prevents use-after-free of recycled slots.
  ******************************************************************************/
-#include "../../../../kernel/include/capability.h"
-#include "../../../../kernel/include/kmemory.h"
+#include "capability.h"
+#include "kmemory.h"
 
 static XTokenEntry g_table[XTOK_TABLE_SLOTS];
 static UINT32      g_live;
