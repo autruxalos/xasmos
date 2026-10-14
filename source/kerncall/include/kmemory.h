@@ -5,6 +5,8 @@
  * Flat bitmap of 4 KiB frames. Huge-page (2 MiB) helpers group 512 frames.
  * Not exposed to apps — apps receive Hardware Tokens, not raw frame numbers.
  ******************************************************************************/
+#include "efi_types.h"
+
 #ifndef XASMOS_KMEMORY_H
 #define XASMOS_KMEMORY_H
 
