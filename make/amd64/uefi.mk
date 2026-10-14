@@ -1,8 +1,4 @@
-# =============================================================================
-# make/amd64/uefi.mk — EXORD EFI → xeret → BOOTX64.EFI
-# Paths: source/arch/amd64/boot/exord/efi/
-# =============================================================================
-
+# make/amd64/uefi.mk
 BUILD       := build/amd64-uefi
 ESP         := $(BUILD)/esp
 EFI_OUT     := $(ESP)/EFI/BOOT/BOOTX64.EFI
@@ -66,13 +62,12 @@ $(EFI_OUT): $(SO_OUT) | dirs
 efi: $(EFI_OUT)
 
 image: $(EFI_OUT)
-	@echo "[IMG] $(BUILD)/xasmos-esp.img"
 	@dd if=/dev/zero of=$(BUILD)/xasmos-esp.img bs=1M count=32 status=none
 	@mkfs.vfat -F 32 -n XASMOS $(BUILD)/xasmos-esp.img >/dev/null
 	@mmd -i $(BUILD)/xasmos-esp.img ::/EFI 2>/dev/null || true
 	@mmd -i $(BUILD)/xasmos-esp.img ::/EFI/BOOT 2>/dev/null || true
 	@mcopy -o -i $(BUILD)/xasmos-esp.img $(EFI_OUT) ::/EFI/BOOT/BOOTX64.EFI
-	@echo "      OK"
+	@echo "[IMG] $(BUILD)/xasmos-esp.img"
 
 run run-uefi: image
 	@test -f "$(OVMF_CODE)" || (echo "Missing OVMF_CODE=$(OVMF_CODE)"; exit 1)
@@ -89,4 +84,3 @@ info: efi
 
 clean:
 	rm -rf $(BUILD)
-	@echo "[CLEAN] $(BUILD) OK"
