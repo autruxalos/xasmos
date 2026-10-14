@@ -1,6 +1,6 @@
 /******************************************************************************
  * XASMOS - Hardware Token (capability) definitions
- * Path: source|kernel|include|capability.h
+ * Path: source|kerncall|include|capability.h
  *
  * xeret is a notary: physical resources are only usable through 64-bit tokens.
  * Apps never receive raw frame numbers; they receive opaque tokens.
