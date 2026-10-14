@@ -6,7 +6,7 @@
  * after ExitBootServices. Runtime/ACPI-NVS/MMIO stay reserved forever.
  * ACPI reclaim is reserved until an ACPI LibOS claims it via token.
  ******************************************************************************/
-#include "../../../../kernel/include/kmemory.h"
+#include "kmemory.h"
 
 /* Static bitmap — no dynamic alloc before the allocator exists. */
 static UINT8      g_bitmap_storage[XERET_BITMAP_BYTES];
