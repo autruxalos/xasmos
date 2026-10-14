@@ -5,12 +5,10 @@
  * Flat bitmap of 4 KiB frames. Huge-page (2 MiB) helpers group 512 frames.
  * Not exposed to apps — apps receive Hardware Tokens, not raw frame numbers.
  ******************************************************************************/
-#include "efi_types.h"
-
 #ifndef XASMOS_KMEMORY_H
 #define XASMOS_KMEMORY_H
 
-#include "../arch/amd64/boot/efi/efi_types.h"
+#include #include "efi_types.h"
 
 /* 4 KiB physical frame */
 #define XERET_FRAME_SHIFT   12
