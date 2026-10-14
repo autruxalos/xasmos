@@ -6,7 +6,6 @@
  * Replaces firmware page tables after ExitBootServices.
  ******************************************************************************/
 #include "kmemory.h"
-#include "capability.h"
 #include "paging.h"
 
 /* 512 entries per table level */
