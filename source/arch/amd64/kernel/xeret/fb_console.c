@@ -2,7 +2,7 @@
  * XASMOS - Linear framebuffer console (GOP)
  * Path: source|arch|amd64|kernel|xeret|fb_console.c
  ******************************************************************************/
-#include "../../boot/efi/efi_types.h"
+#include "efi_types.h"
 #include "font8x16.h"
 
 static FramebufferInfo fb_info;
