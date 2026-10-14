@@ -1,64 +1,123 @@
 /******************************************************************************
- * XASMOS - Minimal UEFI entry point (x86_64, no EDK2/gnu-efi dependency)
+ * XASMOS - EXORD UEFI entry (amd64, no EDK2)
  * Path: source|arch|amd64|boot|efi|efi_main.c
+ *
+ * 1. Locate GOP → FramebufferInfo
+ * 2. Capture UEFI memory map into a static buffer
+ * 3. ExitBootServices (retry until MapKey is accepted)
+ * 4. Build XeretHandoff and jump to kernel_main
  ******************************************************************************/
 #include "efi_types.h"
 
-/* FramebufferInfo is defined once, in efi_types.h -- shared with
- * fb_console.c and kernel_main.c so the layout can never drift apart. */
-extern void kernel_main(FramebufferInfo *fb);
+extern void kernel_main(XeretHandoff *hand);
 
 static EFI_GUID gopGuid = EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID;
 
-/* Static buffer for the memory map -- avoids needing AllocatePool for this. */
-#define MAX_MMAP_BYTES 16384
-static UINT8 mmap_buffer[MAX_MMAP_BYTES];
+/* Static storage: survives ExitBootServices (image memory stays mapped). */
+static UINT8        g_mmap_raw[XERET_MMAP_MAX_BYTES];
+static XeretHandoff g_hand;
+
+static void halt_forever(void) {
+    for (;;) {
+        __asm__ volatile ("hlt");
+    }
+}
+
+/* Highest exclusive physical address from Conventional / reclaimable regions. */
+static UINT64 compute_phys_end(const UINT8 *map, UINT64 map_size, UINT64 desc_size) {
+    UINT64 end = 0;
+    UINT64 off;
+
+    if (desc_size < sizeof(EFI_MEMORY_DESCRIPTOR)) {
+        return 0;
+    }
+
+    for (off = 0; off + desc_size <= map_size; off += desc_size) {
+        const EFI_MEMORY_DESCRIPTOR *d =
+            (const EFI_MEMORY_DESCRIPTOR *)(map + off);
+        UINT64 region_end;
+
+        /* Skip non-RAM types for the upper bound used by the bitmap. */
+        switch (d->Type) {
+        case EfiLoaderCode:
+        case EfiLoaderData:
+        case EfiBootServicesCode:
+        case EfiBootServicesData:
+        case EfiConventionalMemory:
+        case EfiACPIReclaimMemory:
+            break;
+        default:
+            continue;
+        }
+
+        region_end = d->PhysicalStart + (d->NumberOfPages << 12);
+        if (region_end > end) {
+            end = region_end;
+        }
+    }
+    return end;
+}
 
 EFI_STATUS EFIAPI efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
-    (void)ImageHandle;
     EFI_BOOT_SERVICES *BS = SystemTable->BootServices;
-
-    /* 1. Locate the Graphics Output Protocol and read its current mode. */
     EFI_GRAPHICS_OUTPUT_PROTOCOL *gop = 0;
-    EFI_STATUS status = BS->LocateProtocol(&gopGuid, 0, (void **)&gop);
-    if (status != EFI_SUCCESS || gop == 0) {
-        /* No GOP available -- nothing we can draw to. Halt visibly. */
-        for (;;) { __asm__ volatile ("hlt"); }
+    EFI_STATUS status;
+    UINTN mmap_size;
+    UINTN map_key;
+    UINTN desc_size;
+    UINT32 desc_version;
+    int attempt;
+
+    /* --- 1. GOP --- */
+    status = BS->LocateProtocol(&gopGuid, 0, (void **)&gop);
+    if (status != EFI_SUCCESS || gop == 0 || gop->Mode == 0 || gop->Mode->Info == 0) {
+        halt_forever();
     }
 
-    FramebufferInfo fb;
-    fb.base                 = gop->Mode->FrameBufferBase;
-    fb.width                = gop->Mode->Info->HorizontalResolution;
-    fb.height                = gop->Mode->Info->VerticalResolution;
-    fb.pixels_per_scanline    = gop->Mode->Info->PixelsPerScanLine;
-    fb.pixel_format           = (UINT32)gop->Mode->Info->PixelFormat;
+    g_hand.fb.base               = gop->Mode->FrameBufferBase;
+    g_hand.fb.width              = gop->Mode->Info->HorizontalResolution;
+    g_hand.fb.height             = gop->Mode->Info->VerticalResolution;
+    g_hand.fb.pixels_per_scanline = gop->Mode->Info->PixelsPerScanLine;
+    g_hand.fb.pixel_format       = (UINT32)gop->Mode->Info->PixelFormat;
 
-    /* 2. Get the memory map -- required to call ExitBootServices, and the
-     *    MapKey from THIS exact call must match the one we pass below. */
-    UINTN mmapSize = MAX_MMAP_BYTES;
-    UINTN mapKey = 0, descriptorSize = 0;
-    UINT32 descriptorVersion = 0;
-    status = BS->GetMemoryMap(&mmapSize, (EFI_MEMORY_DESCRIPTOR *)mmap_buffer,
-                               &mapKey, &descriptorSize, &descriptorVersion);
+    /*
+     * --- 2+3. Memory map + ExitBootServices ---
+     * UEFI may mutate the map between GetMemoryMap and ExitBootServices.
+     * Loop until ExitBootServices accepts the key (or we give up).
+     */
+    for (attempt = 0; attempt < 8; attempt++) {
+        mmap_size     = XERET_MMAP_MAX_BYTES;
+        map_key       = 0;
+        desc_size     = 0;
+        desc_version  = 0;
+
+        status = BS->GetMemoryMap(&mmap_size,
+                                  (EFI_MEMORY_DESCRIPTOR *)g_mmap_raw,
+                                  &map_key,
+                                  &desc_size,
+                                  &desc_version);
+
+        if (status == EFI_BUFFER_TOO_SMALL) {
+            /* Static buffer too small for this machine — cannot proceed. */
+            halt_forever();
+        }
+        if (status != EFI_SUCCESS) {
+            halt_forever();
+        }
+
+        status = BS->ExitBootServices(ImageHandle, map_key);
+        if (status == EFI_SUCCESS) {
+            break;
+        }
+        /* MapKey stale — retry with a fresh map. */
+    }
+
     if (status != EFI_SUCCESS) {
-        for (;;) { __asm__ volatile ("hlt"); }
+        halt_forever();
     }
 
-    /* 3. Leave firmware services -- no more Boot Services calls after this. */
-    status = BS->ExitBootServices(ImageHandle, mapKey);
-    if (status != EFI_SUCCESS) {
-        /* MapKey went stale (firmware updated the map between calls).
-         * Minimal recovery: retry once with a fresh map. Real kernel
-         * should loop this properly; one retry is enough to get moving. */
-        mmapSize = MAX_MMAP_BYTES;
-        BS->GetMemoryMap(&mmapSize, (EFI_MEMORY_DESCRIPTOR *)mmap_buffer,
-                          &mapKey, &descriptorSize, &descriptorVersion);
-        BS->ExitBootServices(ImageHandle, mapKey);
-    }
-
-    /* 4. Firmware services are gone. Hand off to the exokernel. */
-    kernel_main(&fb);
-
-    for (;;) { __asm__ volatile ("hlt"); }
-    return EFI_SUCCESS;
-}
+    /* --- 4. Handoff (no Boot Services beyond this point) --- */
+    g_hand.magic             = XERET_HANDOFF_MAGIC;
+    g_hand.mmap_addr         = (UINT64)(UINTN)g_mmap_raw;
+    g_hand.mmap_size         = (UINT64)mmap_size;
+    g_hand.mmap_desc_size    = (UI
