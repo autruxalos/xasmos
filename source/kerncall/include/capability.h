@@ -5,6 +5,8 @@
  * xeret is a notary: physical resources are only usable through 64-bit tokens.
  * Apps never receive raw frame numbers; they receive opaque tokens.
  ******************************************************************************/
+#include "efi_types.h"
+
 #ifndef XASMOS_CAPABILITY_H
 #define XASMOS_CAPABILITY_H
 
