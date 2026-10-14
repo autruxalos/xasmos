@@ -8,7 +8,7 @@
 #ifndef XASMOS_KMEMORY_H
 #define XASMOS_KMEMORY_H
 
-#include #include "efi_types.h"
+#include "efi_types.h"
 
 /* 4 KiB physical frame */
 #define XERET_FRAME_SHIFT   12
