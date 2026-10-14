@@ -8,7 +8,7 @@
 #ifndef XASMOS_PAGING_H
 #define XASMOS_PAGING_H
 
-#include "../../arch/amd64/boot/efi/efi_types.h"
+#include "efi_types.h"
 
 /* x86-64 entry flags (shared numeric values; layout is amd64-specific in .c) */
 #define XPT_PRESENT   (1ULL << 0)
