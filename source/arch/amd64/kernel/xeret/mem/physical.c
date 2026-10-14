@@ -1,83 +1,239 @@
 /******************************************************************************
- * Xeret - Physical Page Frame Allocator & Security Ledger
+ * XASMOS - Physical frame bitmap (xeret)
  * Path: source|arch|amd64|kernel|xeret|mem|physical.c
+ *
+ * Policy: UEFI ConventionalMemory + BootServices* + Loader* become free
+ * after ExitBootServices. Runtime/ACPI-NVS/MMIO stay reserved forever.
+ * ACPI reclaim is reserved until an ACPI LibOS claims it via token.
  ******************************************************************************/
+#include "../../../../kernel/include/kmemory.h"
 
-typedef unsigned long long uint64_t;
-typedef unsigned int uint32_t;
+/* Static bitmap — no dynamic alloc before the allocator exists. */
+static UINT8      g_bitmap_storage[XERET_BITMAP_BYTES];
+static PhysBitmap g_phys;
 
-#define PAGE_SIZE          4096
-#define BITMAP_EMPTY       0x0000000000000000ULL
-#define MAX_MEM_TOKENS     1024
+static void bit_set(UINT64 frame) {
+    g_phys.bits[frame >> 3] |= (UINT8)(1u << (frame & 7));
+}
 
-typedef struct {
-    uint64_t start_frame;
-    uint64_t total_pages;
-    uint64_t secure_token; // Cryptographic token assigned to a LibOS
-} HardwareAllocationToken;
+static void bit_clear(UINT64 frame) {
+    g_phys.bits[frame >> 3] &= (UINT8)~(1u << (frame & 7));
+}
 
-// Static kernel memory structures (No external runtime or heap dependency)
-static uint64_t memory_bitmap[32768]; // Supports tracking up to 8GB of physical RAM
-static HardwareAllocationToken active_allocations[MAX_MEM_TOKENS];
-static uint32_t allocation_count = 0;
+static int bit_test(UINT64 frame) {
+    return (g_phys.bits[frame >> 3] >> (frame & 7)) & 1;
+}
 
-/**
- * Initializes the physical bitmap, marking available RAM frames as free.
- */
-void physical_mem_init(uint64_t total_ram_bytes) {
-    uint64_t total_pages = total_ram_bytes / PAGE_SIZE;
-    uint64_t bitmap_quadwords = total_pages / 64;
+static void mark_range_free(UINT64 start, UINT64 pages) {
+    UINT64 f, end;
 
-    if (bitmap_quadwords > 32768) {
-        bitmap_quadwords = 32768;
+    if (pages == 0) {
+        return;
     }
-
-    for (uint64_t i = 0; i < bitmap_quadwords; i++) {
-        memory_bitmap[i] = BITMAP_EMPTY; // 0 indicates a free page frame
+    f = start >> XERET_FRAME_SHIFT;
+    end = f + pages;
+    if (end > g_phys.total_frames) {
+        end = g_phys.total_frames;
+    }
+    for (; f < end; f++) {
+        if (!bit_test(f)) {
+            bit_set(f);
+            g_phys.free_frames++;
+            if (g_phys.used_frames > 0) {
+                g_phys.used_frames--;
+            }
+        }
     }
 }
 
-/**
- * Exclusively assigns a contiguous block of physical pages to a client LibOS.
- */
-uint64_t allocate_physical_block(uint64_t pages_requested, uint64_t client_token) {
-    if (pages_requested == 0 || allocation_count >= MAX_MEM_TOKENS) {
+static void mark_range_used(UINT64 start, UINT64 bytes) {
+    UINT64 f, end, pages;
+
+    if (bytes == 0) {
+        return;
+    }
+    f = start >> XERET_FRAME_SHIFT;
+    pages = (bytes + XERET_FRAME_SIZE - 1) >> XERET_FRAME_SHIFT;
+    end = f + pages;
+    if (end > g_phys.total_frames) {
+        end = g_phys.total_frames;
+    }
+    for (; f < end; f++) {
+        if (bit_test(f)) {
+            bit_clear(f);
+            if (g_phys.free_frames > 0) {
+                g_phys.free_frames--;
+            }
+            g_phys.used_frames++;
+        }
+    }
+}
+
+int phys_init_from_handoff(const XeretHandoff *hand) {
+    const UINT8 *map;
+    UINT64 off, desc_size, map_size, phys_end, frames;
+    UINT64 i;
+
+    if (hand == 0 || hand->magic != XERET_HANDOFF_MAGIC) {
+        return -1;
+    }
+    if (hand->mmap_addr == 0 || hand->mmap_size == 0 || hand->mmap_desc_size == 0) {
+        return -1;
+    }
+
+    phys_end = hand->phys_end;
+    if (phys_end == 0) {
+        return -1;
+    }
+
+    /* Round up to frame boundary */
+    frames = (phys_end + XERET_FRAME_SIZE - 1) >> XERET_FRAME_SHIFT;
+    if (frames > XERET_BITMAP_MAX_FRAMES) {
+        frames = XERET_BITMAP_MAX_FRAMES;
+        phys_end = frames << XERET_FRAME_SHIFT;
+    }
+
+    g_phys.bits         = g_bitmap_storage;
+    g_phys.total_frames = frames;
+    g_phys.phys_end     = phys_end;
+    g_phys.free_frames  = 0;
+    g_phys.used_frames  = frames;
+
+    /* Default: everything used/reserved */
+    for (i = 0; i < XERET_BITMAP_BYTES; i++) {
+        g_bitmap_storage[i] = 0;
+    }
+
+    map       = (const UINT8 *)(UINTN)hand->mmap_addr;
+    map_size  = hand->mmap_size;
+    desc_size = hand->mmap_desc_size;
+
+    for (off = 0; off + desc_size <= map_size; off += desc_size) {
+        const EFI_MEMORY_DESCRIPTOR *d =
+            (const EFI_MEMORY_DESCRIPTOR *)(map + off);
+
+        switch (d->Type) {
+        case EfiConventionalMemory:
+        case EfiBootServicesCode:
+        case EfiBootServicesData:
+        case EfiLoaderCode:
+        case EfiLoaderData:
+            /* Free RAM after ExitBootServices */
+            mark_range_free(d->PhysicalStart, d->NumberOfPages);
+            break;
+        default:
+            /* Runtime, ACPI NVS, MMIO, reserved, ACPI reclaim: stay used */
+            break;
+        }
+    }
+
+    /* Always reserve the first 1 MiB (IVT/BDA/legacy holes) */
+    phys_reserve_range(0, 0x100000);
+
+    /* Reserve framebuffer pages so the console never gets recycled */
+    if (hand->fb.base != 0 && hand->fb.height != 0) {
+        UINT64 fb_bytes = (UINT64)hand->fb.pixels_per_scanline * 4ULL *
+                          (UINT64)hand->fb.height;
+        phys_reserve_range(hand->fb.base, fb_bytes);
+    }
+
+    return 0;
+}
+
+UINT64 phys_alloc_frames(UINT64 n) {
+    UINT64 start, run, f;
+
+    if (n == 0 || n > g_phys.free_frames) {
         return 0;
     }
 
-    uint64_t continuous_found = 0;
-    uint64_t start_index = 0;
-    uint64_t max_bits = 32768 * 64;
-
-    // Linear flat scan across the bitmap
-    for (uint64_t i = 0; i < max_bits; i++) {
-        uint64_t word = i / 64;
-        uint64_t bit = i % 64;
-
-        if (!(memory_bitmap[word] & (1ULL << bit))) {
-            if (continuous_found == 0) {
-                start_index = i;
+    run = 0;
+    start = 0;
+    for (f = 0; f < g_phys.total_frames; f++) {
+        if (bit_test(f)) {
+            if (run == 0) {
+                start = f;
             }
-            continuous_found++;
-            
-            if (continuous_found == pages_requested) {
-                // Lock the physical pages in the bitmap
-                for (uint64_t j = start_index; j < start_index + pages_requested; j++) {
-                    memory_bitmap[j / 64] |= (1ULL << (j % 64));
+            run++;
+            if (run == n) {
+                UINT64 i;
+                for (i = start; i < start + n; i++) {
+                    bit_clear(i);
                 }
-                
-                // Register hardware ownership under the client token
-                active_allocations[allocation_count].start_frame = start_index;
-                active_allocations[allocation_count].total_pages = pages_requested;
-                active_allocations[allocation_count].secure_token = client_token;
-                allocation_count++;
-
-                return start_index * PAGE_SIZE; // Returns the raw physical memory address
+                g_phys.free_frames -= n;
+                g_phys.used_frames += n;
+                return start << XERET_FRAME_SHIFT;
             }
         } else {
-            continuous_found = 0; // Contiguity broken
+            run = 0;
         }
     }
-    
-    return 0; // Out of memory or severely fragmented
+    return 0;
+}
+
+void phys_free_frames(UINT64 addr, UINT64 n) {
+    UINT64 f, i;
+
+    if (n == 0 || (addr & (XERET_FRAME_SIZE - 1)) != 0) {
+        return;
+    }
+    f = addr >> XERET_FRAME_SHIFT;
+    if (f + n > g_phys.total_frames) {
+        return;
+    }
+    for (i = f; i < f + n; i++) {
+        if (!bit_test(i)) {
+            bit_set(i);
+            g_phys.free_frames++;
+            if (g_phys.used_frames > 0) {
+                g_phys.used_frames--;
+            }
+        }
+    }
+}
+
+UINT64 phys_alloc_huge(void) {
+    UINT64 f, run, start;
+
+    run = 0;
+    start = 0;
+    /* Scan for 512 contiguous free frames at a 2 MiB boundary */
+    for (f = 0; f < g_phys.total_frames; f++) {
+        if ((f & (XERET_FRAMES_PER_HUGE - 1)) == 0) {
+            run = 0;
+            start = f;
+        }
+        if (bit_test(f)) {
+            run++;
+            if (run == XERET_FRAMES_PER_HUGE) {
+                UINT64 i;
+                for (i = start; i < start + XERET_FRAMES_PER_HUGE; i++) {
+                    bit_clear(i);
+                }
+                g_phys.free_frames -= XERET_FRAMES_PER_HUGE;
+                g_phys.used_frames += XERET_FRAMES_PER_HUGE;
+                return start << XERET_FRAME_SHIFT;
+            }
+        } else {
+            run = 0;
+            /* Next candidate must be huge-aligned */
+            if ((f & (XERET_FRAMES_PER_HUGE - 1)) != (XERET_FRAMES_PER_HUGE - 1)) {
+                /* Skip to next huge boundary */
+                f = (f | (XERET_FRAMES_PER_HUGE - 1));
+            }
+        }
+    }
+    return 0;
+}
+
+void phys_reserve_range(UINT64 addr, UINT64 size) {
+    mark_range_used(addr, size);
+}
+
+UINT64 phys_free_count(void) {
+    return g_phys.free_frames;
+}
+
+UINT64 phys_total_count(void) {
+    return g_phys.total_frames;
 }
