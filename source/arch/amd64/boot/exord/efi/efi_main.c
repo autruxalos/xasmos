@@ -1,11 +1,6 @@
 /******************************************************************************
- * XASMOS - EXORD UEFI entry (amd64, no EDK2)
- * Path: source|arch|amd64|boot|exord|efi|efi_main.c
- *
- * 1. Locate GOP → FramebufferInfo
- * 2. Capture UEFI memory map into a static buffer
- * 3. ExitBootServices (retry until MapKey is accepted)
- * 4. Build XeretHandoff and jump to kernel_main
+ * XASMOS EXORD UEFI entry
+ * Path: source/arch/amd64/boot/exord/efi/efi_main.c
  ******************************************************************************/
 #include "efi_types.h"
 
@@ -13,7 +8,6 @@ extern void kernel_main(XeretHandoff *hand);
 
 static EFI_GUID gopGuid = EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID;
 
-/* Static storage: survives ExitBootServices (image memory stays mapped). */
 static UINT8        g_mmap_raw[XERET_MMAP_MAX_BYTES];
 static XeretHandoff g_hand;
 
@@ -23,7 +17,6 @@ static void halt_forever(void) {
     }
 }
 
-/* Highest exclusive physical address from Conventional / reclaimable regions. */
 static UINT64 compute_phys_end(const UINT8 *map, UINT64 map_size, UINT64 desc_size) {
     UINT64 end = 0;
     UINT64 off;
@@ -37,7 +30,6 @@ static UINT64 compute_phys_end(const UINT8 *map, UINT64 map_size, UINT64 desc_si
             (const EFI_MEMORY_DESCRIPTOR *)(map + off);
         UINT64 region_end;
 
-        /* Skip non-RAM types for the upper bound used by the bitmap. */
         switch (d->Type) {
         case EfiLoaderCode:
         case EfiLoaderData:
@@ -68,28 +60,22 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable
     UINT32 desc_version;
     int attempt;
 
-    /* --- 1. GOP --- */
     status = BS->LocateProtocol(&gopGuid, 0, (void **)&gop);
     if (status != EFI_SUCCESS || gop == 0 || gop->Mode == 0 || gop->Mode->Info == 0) {
         halt_forever();
     }
 
-    g_hand.fb.base               = gop->Mode->FrameBufferBase;
-    g_hand.fb.width              = gop->Mode->Info->HorizontalResolution;
-    g_hand.fb.height             = gop->Mode->Info->VerticalResolution;
+    g_hand.fb.base                = gop->Mode->FrameBufferBase;
+    g_hand.fb.width               = gop->Mode->Info->HorizontalResolution;
+    g_hand.fb.height              = gop->Mode->Info->VerticalResolution;
     g_hand.fb.pixels_per_scanline = gop->Mode->Info->PixelsPerScanLine;
-    g_hand.fb.pixel_format       = (UINT32)gop->Mode->Info->PixelFormat;
+    g_hand.fb.pixel_format        = (UINT32)gop->Mode->Info->PixelFormat;
 
-    /*
-     * --- 2+3. Memory map + ExitBootServices ---
-     * UEFI may mutate the map between GetMemoryMap and ExitBootServices.
-     * Loop until ExitBootServices accepts the key (or we give up).
-     */
     for (attempt = 0; attempt < 8; attempt++) {
-        mmap_size     = XERET_MMAP_MAX_BYTES;
-        map_key       = 0;
-        desc_size     = 0;
-        desc_version  = 0;
+        mmap_size    = XERET_MMAP_MAX_BYTES;
+        map_key      = 0;
+        desc_size    = 0;
+        desc_version = 0;
 
         status = BS->GetMemoryMap(&mmap_size,
                                   (EFI_MEMORY_DESCRIPTOR *)g_mmap_raw,
@@ -98,7 +84,6 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable
                                   &desc_version);
 
         if (status == EFI_BUFFER_TOO_SMALL) {
-            /* Static buffer too small for this machine — cannot proceed. */
             halt_forever();
         }
         if (status != EFI_SUCCESS) {
@@ -109,15 +94,21 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable
         if (status == EFI_SUCCESS) {
             break;
         }
-        /* MapKey stale — retry with a fresh map. */
     }
 
     if (status != EFI_SUCCESS) {
         halt_forever();
     }
 
-    /* --- 4. Handoff (no Boot Services beyond this point) --- */
     g_hand.magic             = XERET_HANDOFF_MAGIC;
     g_hand.mmap_addr         = (UINT64)(UINTN)g_mmap_raw;
     g_hand.mmap_size         = (UINT64)mmap_size;
-    g_hand.mmap_desc_size    = (UI
+    g_hand.mmap_desc_size    = (UINT64)desc_size;
+    g_hand.mmap_desc_version = desc_version;
+    g_hand._pad              = 0;
+    g_hand.phys_end          = compute_phys_end(g_mmap_raw, mmap_size, desc_size);
+
+    kernel_main(&g_hand);
+    halt_forever();
+    return EFI_SUCCESS;
+}
