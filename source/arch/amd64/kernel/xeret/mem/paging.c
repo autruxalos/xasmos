@@ -5,8 +5,9 @@
  * C builds the tables. Inline ASM only loads CR3 (C cannot express that).
  * Replaces firmware page tables after ExitBootServices.
  ******************************************************************************/
-#include "../../../../kerncall/include/paging.h"
-#include "../../../../kerncall/include/kmemory.h"
+#include "kmemory.h"
+#include "capability.h"
+#include "paging.h"
 
 /* 512 entries per table level */
 #define XPT_ENTS 512ULL
