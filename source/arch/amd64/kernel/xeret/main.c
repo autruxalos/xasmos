@@ -2,9 +2,10 @@
  * XASMOS - xeret entry (UEFI / GOP)
  * Path: source|arch|amd64|kernel|xeret|main.c
  ******************************************************************************/
-#include "../../boot/efi/efi_types.h"
-#include "../../../kernel/include/kmemory.h"
-#include "../../../kernel/include/capability.h"
+#include "efi_types.h"
+#include "kmemory.h"
+#include "capability.h"
+#include "paging.h"
 
 extern void fb_console_init(FramebufferInfo *fb);
 extern void xk_print(const char *str);
