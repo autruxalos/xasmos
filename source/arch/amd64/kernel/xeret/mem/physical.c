@@ -1,16 +1,21 @@
 /******************************************************************************
- * XASMOS - Physical frame bitmap (xeret)
+ * XASMOS - Physical frame bitmap (xeret internal)
  * Path: source|arch|amd64|kernel|xeret|mem|physical.c
  *
  * Policy: UEFI ConventionalMemory + BootServices* + Loader* become free
  * after ExitBootServices. Runtime/ACPI-NVS/MMIO stay reserved forever.
  * ACPI reclaim is reserved until an ACPI LibOS claims it via token.
+ *
+ * Concurrency: one coarse-grained spinlock guards the bitmap. Must never be
+ * held while calling into token_ledger.c (see that file's header comment).
  ******************************************************************************/
 #include "kmemory.h"
+#include "spinlock.h"
 
 /* Static bitmap — no dynamic alloc before the allocator exists. */
 static UINT8      g_bitmap_storage[XERET_BITMAP_BYTES];
 static PhysBitmap g_phys;
+static XSpinlock  g_lock = XSPINLOCK_INIT;
 
 static void bit_set(UINT64 frame) {
     g_phys.bits[frame >> 3] |= (UINT8)(1u << (frame & 7));
@@ -69,6 +74,7 @@ static void mark_range_used(UINT64 start, UINT64 bytes) {
     }
 }
 
+/* Called once at boot, before APs start and before xspin_lock is needed. */
 int phys_init_from_handoff(const XeretHandoff *hand) {
     const UINT8 *map;
     UINT64 off, desc_size, map_size, phys_end, frames;
@@ -98,6 +104,7 @@ int phys_init_from_handoff(const XeretHandoff *hand) {
     g_phys.phys_end     = phys_end;
     g_phys.free_frames  = 0;
     g_phys.used_frames  = frames;
+    g_lock              = XSPINLOCK_INIT;
 
     /* Default: everything used/reserved */
     for (i = 0; i < XERET_BITMAP_BYTES; i++) {
@@ -141,14 +148,21 @@ int phys_init_from_handoff(const XeretHandoff *hand) {
 }
 
 UINT64 phys_alloc_frames(UINT64 n) {
-    UINT64 start, run, f;
+    UINT64 start, run, f, result;
 
-    if (n == 0 || n > g_phys.free_frames) {
+    if (n == 0) {
+        return 0;
+    }
+
+    xspin_lock(&g_lock);
+    if (n > g_phys.free_frames) {
+        xspin_unlock(&g_lock);
         return 0;
     }
 
     run = 0;
     start = 0;
+    result = 0;
     for (f = 0; f < g_phys.total_frames; f++) {
         if (bit_test(f)) {
             if (run == 0) {
@@ -162,13 +176,15 @@ UINT64 phys_alloc_frames(UINT64 n) {
                 }
                 g_phys.free_frames -= n;
                 g_phys.used_frames += n;
-                return start << XERET_FRAME_SHIFT;
+                result = start << XERET_FRAME_SHIFT;
+                break;
             }
         } else {
             run = 0;
         }
     }
-    return 0;
+    xspin_unlock(&g_lock);
+    return result;
 }
 
 void phys_free_frames(UINT64 addr, UINT64 n) {
@@ -178,7 +194,10 @@ void phys_free_frames(UINT64 addr, UINT64 n) {
         return;
     }
     f = addr >> XERET_FRAME_SHIFT;
+
+    xspin_lock(&g_lock);
     if (f + n > g_phys.total_frames) {
+        xspin_unlock(&g_lock);
         return;
     }
     for (i = f; i < f + n; i++) {
@@ -190,13 +209,16 @@ void phys_free_frames(UINT64 addr, UINT64 n) {
             }
         }
     }
+    xspin_unlock(&g_lock);
 }
 
 UINT64 phys_alloc_huge(void) {
-    UINT64 f, run, start;
+    UINT64 f, run, start, result;
 
+    xspin_lock(&g_lock);
     run = 0;
     start = 0;
+    result = 0;
     /* Scan for 512 contiguous free frames at a 2 MiB boundary */
     for (f = 0; f < g_phys.total_frames; f++) {
         if ((f & (XERET_FRAMES_PER_HUGE - 1)) == 0) {
@@ -212,7 +234,8 @@ UINT64 phys_alloc_huge(void) {
                 }
                 g_phys.free_frames -= XERET_FRAMES_PER_HUGE;
                 g_phys.used_frames += XERET_FRAMES_PER_HUGE;
-                return start << XERET_FRAME_SHIFT;
+                result = start << XERET_FRAME_SHIFT;
+                break;
             }
         } else {
             run = 0;
@@ -223,17 +246,25 @@ UINT64 phys_alloc_huge(void) {
             }
         }
     }
-    return 0;
+    xspin_unlock(&g_lock);
+    return result;
 }
 
 void phys_reserve_range(UINT64 addr, UINT64 size) {
+    xspin_lock(&g_lock);
     mark_range_used(addr, size);
+    xspin_unlock(&g_lock);
 }
 
 UINT64 phys_free_count(void) {
-    return g_phys.free_frames;
+    UINT64 v;
+    xspin_lock(&g_lock);
+    v = g_phys.free_frames;
+    xspin_unlock(&g_lock);
+    return v;
 }
 
 UINT64 phys_total_count(void) {
+    /* total_frames never changes after init: safe to read without the lock. */
     return g_phys.total_frames;
 }
