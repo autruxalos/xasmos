@@ -3,10 +3,12 @@
  * Path: source|arch|amd64|apps|xsh|core|shell.c
  ******************************************************************************/
 
-/* MAX_INPUT_LEN and MAX_ARG_LEN must stay comfortably above EXFS_DATA_MAX
- * (see exfs.c) plus room for a path and a separating space, or 'write'
- * silently truncates the payload before exfs_write_data ever sees it --
- * exactly the bug this comment replaced. */
+/* A typed line is the binding limit on 'write', NOT the file capacity:
+ * EXFS_DATA_MAX is 4096 (one frame) but one command line carries at most
+ * MAX_ARG_LEN-1 bytes, minus the path. Characters past MAX_INPUT_LEN-1 are
+ * dropped by xk_readline (they simply stop echoing). Raising these to
+ * EXFS_DATA_MAX would need static buffers: ~4 KiB locals would pull in
+ * __chkstk. Large payloads will arrive by other means than the keyboard. */
 #define MAX_INPUT_LEN 512
 #define MAX_CMD_LEN   32
 #define MAX_ARG_LEN   480
@@ -26,10 +28,7 @@ extern void xk_clear(void);
 extern int  cmd_remove_main(const char *path);
 extern int  cmd_form_main(const char *flag, const char *path);
 extern void resolve_superdir_path(const char *cwd, const char *target, char *out_path);
-extern int  exfs_stat(const char *raw_path);   /* -1 absent, else TYPE_* */
-extern int  exfs_enum(const char *dir, void (*cb)(const char *name, int type));
-extern int  exfs_write_data(const char *path, const char *text);   /* 0 ok, -1 absent, -2 truncated */
-extern int  exfs_read_data(const char *path, char *out, int max);  /* >=0 length, -1 absent */
+#include "exfs.h"   /* EXFS_DATA_MAX, EXFS_ERR_*, prototypes: one definition */
 
 static char current_cwd[MAX_PATH_LEN] = "|";
 static int  is_superuser = 0;                  /* 0 = '@', 1 = '%' */
@@ -201,8 +200,6 @@ static void cmd_remove(const char *arg) {
     if (streq(path, current_cwd)) parent_of(path, current_cwd);   /* never leave cwd dangling */
 }
 
-#define EXFS_DATA_MAX 192
-
 static void cmd_write(const char *arg) {
     char path_tok[MAX_CMD_LEN];
     char path[MAX_PATH_LEN];
@@ -219,13 +216,16 @@ static void cmd_write(const char *arg) {
     if (st == TYPE_DIR)  { fail("EXISDIR", "target is a directory"); return; }
 
     int rc = exfs_write_data(path, text);
-    if (rc == -2) fail("EXNOSPC", "text truncated to node capacity");
+    if      (rc == EXFS_ERR_TRUNC)  fail("EXNOSPC", "text truncated to node capacity");
+    else if (rc == EXFS_ERR_NOMEM)  fail("EXNOMEM", "no frame available for node data");
+    else if (rc == EXFS_ERR_DENIED) fail("EXPERM",  "token refused the write");
+    else if (rc < 0)                fail("EXIOERR", "write failed");
     /* rc == 0: silent success, matches the rest of the directive set */
 }
 
 static void cmd_read(const char *arg) {
     char path[MAX_PATH_LEN];
-    char buf[EXFS_DATA_MAX];
+    static char buf[EXFS_DATA_MAX];   /* static: 4 KiB on the stack would need __chkstk */
 
     if (arg[0] == '\0') { fail("EXBADARG", "operand required"); return; }
 
@@ -234,7 +234,9 @@ static void cmd_read(const char *arg) {
     if (st < 0)          { fail("EXNOENT", "path unresolved"); return; }
     if (st == TYPE_DIR)  { fail("EXISDIR", "target is a directory"); return; }
 
-    exfs_read_data(path, buf, sizeof(buf));
+    int n = exfs_read_data(path, buf, sizeof(buf));
+    if (n == EXFS_ERR_DENIED) { fail("EXPERM", "token refused the read"); return; }
+    if (n < 0)                { fail("EXIOERR", "read failed"); return; }
     xk_println(buf);
 }
 
