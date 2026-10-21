@@ -73,6 +73,7 @@ void xtok_init(void) {
         g_table[i].rights     = 0;
         g_table[i].phys       = 0;
         g_table[i].n_frames   = 0;
+        g_table[i].map_count  = 0;
     }
     g_live      = 0;
     g_next_hint = 0;
@@ -108,6 +109,16 @@ static XToken seal_ram_locked(UINT32 owner_id, UINT64 phys, UINT64 n_frames, UIN
     return pack_token(slot, e->generation);
 }
 
+/* Recycled frames still hold their previous owner's bytes. An exokernel must
+ * never hand one owner another's data, so every frame is cleared BEFORE it is
+ * sealed into a token. volatile keeps the optimizer from turning the loop
+ * into a memset call (there is no libc to provide one). */
+static void zero_frames(UINT64 phys, UINT64 n_frames) {
+    volatile UINT64 *p = (volatile UINT64 *)(UINTN)phys;
+    UINT64 words = n_frames * (XERET_FRAME_SIZE / sizeof(UINT64));
+    for (UINT64 i = 0; i < words; i++) p[i] = 0;
+}
+
 XToken xtok_alloc_ram(UINT32 owner_id, UINT64 n_frames, UINT32 rights) {
     UINT64 phys;
     XToken tok;
@@ -119,6 +130,7 @@ XToken xtok_alloc_ram(UINT32 owner_id, UINT64 n_frames, UINT32 rights) {
     if (phys == 0) {
         return XTOKEN_INVALID;
     }
+    zero_frames(phys, n_frames);
 
     xspin_lock(&g_lock);
     tok = seal_ram_locked(owner_id, phys, n_frames, rights);
@@ -138,6 +150,7 @@ XToken xtok_alloc_ram_huge(UINT32 owner_id, UINT32 rights) {
     if (phys == 0) {
         return XTOKEN_INVALID;
     }
+    zero_frames(phys, XERET_FRAMES_PER_HUGE);
 
     xspin_lock(&g_lock);
     tok = seal_ram_locked(owner_id, phys, XERET_FRAMES_PER_HUGE, rights);
@@ -186,6 +199,8 @@ int xtok_release(XToken tok) {
     e = lookup_live(tok);
     if (!e || (e->rights & XTOK_RIGHT_RELEASE) == 0) {
         rc = -1;
+    } else if (e->map_count != 0) {
+        rc = -2;   /* still mapped: revoke the mappings first */
     } else {
         phys = e->phys;
         n    = e->n_frames;
@@ -197,6 +212,7 @@ int xtok_release(XToken tok) {
         e->rights   = 0;
         e->phys     = 0;
         e->n_frames = 0;
+        e->map_count = 0;
         /* Bump generation so old tokens pointing at this slot fail lookup */
         e->generation++;
         if (e->generation == 0) {
@@ -215,13 +231,55 @@ int xtok_release(XToken tok) {
     if (rc == 1) {
         phys_free_frames(phys, n);
     }
-    return (rc < 0) ? -1 : 0;
+    return (rc < 0) ? rc : 0;
 }
 
 UINT32 xtok_live_count(void) {
     UINT32 v;
     xspin_lock(&g_lock);
     v = g_live;
+    xspin_unlock(&g_lock);
+    return v;
+}
+
+int xtok_map_acquire(XToken tok, UINT32 caller_owner, UINT32 rights_needed,
+                     UINT64 *out_phys, UINT64 *out_frames) {
+    XTokenEntry *e;
+    int rc;
+
+    xspin_lock(&g_lock);
+    e = lookup_live(tok);
+    if (!e)                                          rc = XTOK_MAP_ESTALE;
+    else if (e->kind != XTOK_KIND_RAM)               rc = XTOK_MAP_EKIND;
+    else if (e->owner_id != caller_owner)            rc = XTOK_MAP_EOWNER;
+    else if ((e->rights & rights_needed) != rights_needed) rc = XTOK_MAP_ERIGHTS;
+    else if (e->map_count == 0xFFFFu)                rc = XTOK_MAP_EBUSY;
+    else {
+        e->map_count++;
+        if (out_phys)   *out_phys   = e->phys;
+        if (out_frames) *out_frames = e->n_frames;
+        rc = XTOK_MAP_OK;
+    }
+    xspin_unlock(&g_lock);
+    return rc;
+}
+
+void xtok_map_release(XToken tok) {
+    XTokenEntry *e;
+    xspin_lock(&g_lock);
+    e = lookup_live(tok);
+    if (e && e->map_count > 0) {
+        e->map_count--;
+    }
+    xspin_unlock(&g_lock);
+}
+
+UINT32 xtok_map_count(XToken tok) {
+    XTokenEntry *e;
+    UINT32 v;
+    xspin_lock(&g_lock);
+    e = lookup_live(tok);
+    v = e ? e->map_count : 0xFFFFFFFFu;
     xspin_unlock(&g_lock);
     return v;
 }
