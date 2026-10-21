@@ -5,6 +5,8 @@
 #include "efi_types.h"
 #include "kmemory.h"
 #include "capability.h"
+#include "paging.h"
+#include "xproc.h"
 #include "diag.h"
 
 extern void fb_console_init(FramebufferInfo *fb);
@@ -46,6 +48,24 @@ void kernel_main(XeretHandoff *hand) {
         for (;;) { __asm__ volatile ("cli; hlt"); }
     }
     xtok_init();
+
+    /* Replace the firmware's page tables. Framebuffer and MMIO are mapped
+     * explicitly; a failure here leaves no safe state, so halt visibly. */
+    UINT64 fb_bytes = (UINT64)hand->fb.pixels_per_scanline * 4ULL * hand->fb.height;
+    if (xpt_init_identity(hand->phys_end, hand->fb.base, fb_bytes) != 0) {
+        xk_println("EXBADBOOT: page table install failed. Halting.");
+        serial_puts("EXBADBOOT: xpt_init_identity failed\n");
+        for (;;) { __asm__ volatile ("cli; hlt"); }
+    }
+
+    /* GDT with ring-3 segments + TSS, IDT reload, syscall gate, #DF on its own stack. */
+    xproc_init();
+
+    xk_print("prot:");
+    if (xpt_protections() & XPROT_NX)   xk_print(" NX");
+    if (xpt_protections() & XPROT_WP)   xk_print(" WP");
+    if (xpt_protections() & XPROT_SMEP) xk_print(" SMEP");
+    xk_println("");
 
     xk_print("fb "); fb_hex(hand->fb.width); xk_print("x"); fb_hex(hand->fb.height);
     xk_print(" phys_end="); fb_hex(hand->phys_end); xk_println("");
