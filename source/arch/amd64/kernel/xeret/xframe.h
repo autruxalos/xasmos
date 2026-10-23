@@ -19,6 +19,11 @@ typedef void (*IdtHook)(ExcFrame *f, unsigned long long cr2);
 
 void idt_set_hook(IdtHook h);
 
+/* Hardware interrupts (vectors 32..255): hook is called with the frame; it
+ * returns normally, or abandons the interrupted context. */
+void idt_set_irq_hook(IdtHook h);
+void idt_install_irq_gates(void);
+
 /* Adds the DPL-3 syscall gate (int 0x80) and puts #DF on IST1. Requires the
  * TSS from gdt_init() to be loaded first. */
 void idt_install_user_gates(void);
