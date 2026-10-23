@@ -46,6 +46,10 @@ extern char isr_stub_syscall[];
 static IdtHook g_hook;
 void idt_set_hook(IdtHook h) { g_hook = h; }
 
+extern char isr_irq_base[];
+static IdtHook g_irq_hook;
+void idt_set_irq_hook(IdtHook h) { g_irq_hook = h; }
+
 /* 32 stubs, 16 bytes apart. Vectors that push a CPU error code skip the
  * dummy push so every frame has the same shape. */
 __asm__(
@@ -117,6 +121,23 @@ __asm__(
     "    jmp isr_common\n"
 );
 
+/* Hardware interrupts / stray vectors 32..255. 16 bytes per stub, so vector v
+ * lives at isr_irq_base + 16*(v-32). None of them has a CPU error code. */
+__asm__(
+    ".text\n"
+    ".balign 16\n"
+    ".globl isr_irq_base\n"
+    "isr_irq_base:\n"
+    ".set ivec, 32\n"
+    ".rept 224\n"
+    "    .balign 16\n"
+    "    pushq $0\n"
+    "    pushq $ivec\n"
+    "    jmp isr_common\n"
+    "    .set ivec, ivec + 1\n"
+    ".endr\n"
+);
+
 static const char *const exc_names[32] = {
     "#DE divide error",          "#DB debug",
     "NMI",                       "#BP breakpoint",
@@ -166,6 +187,12 @@ void exception_handler(ExcFrame *f) {
     u64 cr2, cr3;
     __asm__ volatile ("mov %%cr2, %0" : "=r"(cr2));
     __asm__ volatile ("mov %%cr3, %0" : "=r"(cr3));
+
+    /* Vectors >= 32 (except the syscall gate) are interrupts, not faults. */
+    if (f->vector >= 32 && f->vector != 0x80) {
+        if (g_irq_hook) g_irq_hook(f, cr2);
+        return;
+    }
 
     /* A syscall, or ANY exception raised in ring 3, is the owner's problem,
      * not the kernel's: hand it to the process layer instead of halting. */
@@ -253,6 +280,23 @@ void idt_install_user_gates(void) {
     idt[0x80].zero     = 0;
 
     idt[8].ist = 1;                             /* #DF runs on its own stack (TSS.IST1) */
+}
+
+void idt_install_irq_gates(void) {
+    u64 cs;
+    __asm__ volatile ("mov %%cs, %0" : "=r"(cs));
+
+    for (int v = 32; v < 256; v++) {
+        if (v == 0x80) continue;                 /* the DPL-3 syscall gate */
+        u64 addr = (u64)(isr_irq_base + 16 * (v - 32));
+        idt[v].off_lo   = (u16)(addr & 0xFFFF);
+        idt[v].selector = (u16)cs;
+        idt[v].ist      = 0;
+        idt[v].attr     = 0x8E;                  /* present, DPL 0: ring 3 cannot int n */
+        idt[v].off_mid  = (u16)((addr >> 16) & 0xFFFF);
+        idt[v].off_hi   = (u32)(addr >> 32);
+        idt[v].zero     = 0;
+    }
 }
 
 void diag_init(void) {
