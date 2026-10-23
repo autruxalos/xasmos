@@ -7,6 +7,7 @@
 #include "capability.h"
 #include "paging.h"
 #include "xproc.h"
+#include "lapic.h"
 #include "diag.h"
 
 extern void fb_console_init(FramebufferInfo *fb);
@@ -60,6 +61,15 @@ void kernel_main(XeretHandoff *hand) {
 
     /* GDT with ring-3 segments + TSS, IDT reload, syscall gate, #DF on its own stack. */
     xproc_init();
+
+    /* CPU time as a resource: PIC masked, LAPIC timer calibrated. Optional:
+     * without it programs simply run until they exit, yield or fault. */
+    if (lapic_timer_init() == 0) {
+        xk_print("timer: LAPIC ticks/ms="); fb_hex(lapic_ticks_per_ms());
+        xk_println(lapic_x2apic() ? " (x2APIC)" : " (xAPIC)");
+    } else {
+        xk_println("timer: unavailable, no preemption");
+    }
 
     xk_print("prot:");
     if (xpt_protections() & XPROT_NX)   xk_print(" NX");
