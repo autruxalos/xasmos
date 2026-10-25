@@ -190,28 +190,38 @@ int xtok_ram_info(XToken tok, UINT64 *out_phys, UINT64 *out_frames) {
     return rc;
 }
 
-int xtok_release(XToken tok) {
+#define REL_CHECK_RIGHT  1u    /* holder-initiated: needs XTOK_RIGHT_RELEASE */
+#define REL_CHECK_OWNER  2u    /* the caller must be the token's owner      */
+
+/* One implementation for every way a token can die, so they cannot drift.
+ * A foreign token reports ESTALE, exactly like a nonexistent one: a caller
+ * must not be able to tell "not yours" from "does not exist". */
+static int release_impl(XToken tok, UINT32 flags, UINT32 owner) {
     XTokenEntry *e;
     UINT64 phys = 0, n = 0;
     int rc;
 
     xspin_lock(&g_lock);
     e = lookup_live(tok);
-    if (!e || (e->rights & XTOK_RIGHT_RELEASE) == 0) {
-        rc = -1;
+    if (!e) {
+        rc = XTOK_REL_ESTALE;
+    } else if ((flags & REL_CHECK_OWNER) && e->owner_id != owner) {
+        rc = XTOK_REL_ESTALE;
+    } else if ((flags & REL_CHECK_RIGHT) && (e->rights & XTOK_RIGHT_RELEASE) == 0) {
+        rc = XTOK_REL_ERIGHTS;
     } else if (e->map_count != 0) {
-        rc = -2;   /* still mapped: revoke the mappings first */
+        rc = XTOK_REL_EBUSY;   /* still mapped: revoke the mappings first */
     } else {
         phys = e->phys;
         n    = e->n_frames;
         int was_ram = (e->kind == XTOK_KIND_RAM && phys != 0 && n != 0);
 
-        e->live     = 0;
-        e->kind     = XTOK_KIND_NONE;
-        e->owner_id = 0;
-        e->rights   = 0;
-        e->phys     = 0;
-        e->n_frames = 0;
+        e->live      = 0;
+        e->kind      = XTOK_KIND_NONE;
+        e->owner_id  = 0;
+        e->rights    = 0;
+        e->phys      = 0;
+        e->n_frames  = 0;
         e->map_count = 0;
         /* Bump generation so old tokens pointing at this slot fail lookup */
         e->generation++;
@@ -232,6 +242,48 @@ int xtok_release(XToken tok) {
         phys_free_frames(phys, n);
     }
     return (rc < 0) ? rc : 0;
+}
+
+/* Kernel-side release by anyone holding the right (the original behaviour:
+ * stale or right-less -> -1, still mapped -> -2). */
+int xtok_release(XToken tok) {
+    int r = release_impl(tok, REL_CHECK_RIGHT, 0);
+    return (r == XTOK_REL_ERIGHTS) ? -1 : r;
+}
+
+int xtok_release_owned(XToken tok, UINT32 owner) {
+    return release_impl(tok, REL_CHECK_RIGHT | REL_CHECK_OWNER, owner);
+}
+
+int xtok_reclaim(XToken tok) {
+    return release_impl(tok, 0, 0);
+}
+
+UINT32 xtok_owner_tokens(UINT32 owner, XToken *out, UINT32 max) {
+    UINT32 n = 0;
+    xspin_lock(&g_lock);
+    for (UINT32 slot = 0; slot < XTOK_TABLE_SLOTS && n < max; slot++) {
+        if (g_table[slot].live && g_table[slot].owner_id == owner) {
+            out[n++] = pack_token(slot, g_table[slot].generation);
+        }
+    }
+    xspin_unlock(&g_lock);
+    return n;
+}
+
+void xtok_owner_usage(UINT32 owner, UINT64 *frames, UINT32 *tokens) {
+    UINT64 f = 0;
+    UINT32 c = 0;
+    xspin_lock(&g_lock);
+    for (UINT32 slot = 0; slot < XTOK_TABLE_SLOTS; slot++) {
+        if (g_table[slot].live && g_table[slot].owner_id == owner) {
+            f += g_table[slot].n_frames;
+            c++;
+        }
+    }
+    xspin_unlock(&g_lock);
+    if (frames) *frames = f;
+    if (tokens) *tokens = c;
 }
 
 UINT32 xtok_live_count(void) {
