@@ -16,6 +16,7 @@
 #include "xframe.h"
 #include "diag.h"
 #include "lapic.h"
+#include "xsys.h"
 
 /* Plain globals (not static): the asm below refers to them by name. */
 UINT64 g_xproc_resume_rsp;
@@ -87,6 +88,7 @@ __asm__(
 
 static XProcResult *g_res;
 static XContext    *g_ctx;
+static XAspace     *g_as;
 static UINT32       g_quantum_ticks;
 static UINT64       g_irq_unexpected;
 static UINT64       g_irq_last;
@@ -123,7 +125,11 @@ static void user_hook(ExcFrame *f, unsigned long long cr2) {
             g_res->rip    = f->rip;
             xproc_leave_asm(XPROC_YIELD);
         default:
-            f->rax = (unsigned long long)-1;     /* unknown syscall */
+            if (f->rax >= XSYS_ALLOC && f->rax <= XSYS_INFO && g_as) {
+                xsys_resource(g_as, f);
+                return;
+            }
+            f->rax = (unsigned long long)XERR_NOSYS;     /* unknown syscall */
             return;
         }
     }
@@ -199,6 +205,7 @@ int xproc_run_ctx(XAspace *as, XContext *ctx, XProcResult *res) {
 
     g_res = res;
     g_ctx = ctx;
+    g_as  = as;
     g_xproc_kernel_cr3 = xpt_pml4_phys();
 
     if (armed) {
@@ -215,6 +222,7 @@ int xproc_run_ctx(XAspace *as, XContext *ctx, XProcResult *res) {
     if (armed) lapic_timer_stop();
     g_res = 0;
     g_ctx = 0;
+    g_as  = 0;
     return r;
 }
 
