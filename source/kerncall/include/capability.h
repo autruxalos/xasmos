@@ -55,6 +55,27 @@ int    xtok_ram_info(XToken tok, UINT64 *out_phys, UINT64 *out_frames);
 int    xtok_release(XToken tok);
 UINT32 xtok_live_count(void);
 
+/* ---- Per-owner operations (syscall layer, process teardown) --------------
+ * Release results (negative = failure). A token that belongs to someone else
+ * reports ESTALE, indistinguishable from one that does not exist. */
+#define XTOK_REL_ESTALE   (-1)
+#define XTOK_REL_EBUSY    (-2)   /* still mapped */
+#define XTOK_REL_ERIGHTS  (-3)   /* owner's token, but without RELEASE */
+
+/* Holder-initiated free: requires ownership AND the RELEASE right. */
+int    xtok_release_owned(XToken tok, UINT32 owner);
+
+/* Kernel-initiated free: ignores rights and owner (abort protocol), but still
+ * refuses a token that is mapped -- revoke its mappings first. */
+int    xtok_reclaim(XToken tok);
+
+/* Fills out[] with up to max live tokens of owner; returns how many. */
+UINT32 xtok_owner_tokens(UINT32 owner, XToken *out, UINT32 max);
+
+/* Frames and tokens an owner holds right now: the single source of truth
+ * for quotas (nothing to keep in sync, nothing to forget to decrement). */
+void   xtok_owner_usage(UINT32 owner, UINT64 *frames, UINT32 *tokens);
+
 /* ---- Map gate (used by xas_map in paging.c) -------------------------------
  * One atomic check-and-pin: the token must be live, RAM, owned by
  * caller_owner, and carry every bit of rights_needed. On success the mapping
