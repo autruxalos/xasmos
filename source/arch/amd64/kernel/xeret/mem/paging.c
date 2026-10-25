@@ -25,7 +25,7 @@
 #define LAPIC_IOAPIC_BASE 0xFEC00000ULL
 #define FOUR_GIB      0x100000000ULL
 #define PML4_SPAN     (1ULL << 39)          /* 512 GiB */
-#define XAS_MAX_MAPS  256
+#define XAS_MAX_MAPS  1024
 
 #define MSR_EFER      0xC0000080u
 #define EFER_NXE      (1ULL << 11)
@@ -34,6 +34,7 @@
 
 typedef struct {
     UINT64 as_pml4;     /* identifies the address space */
+    UINT32 owner;       /* for the per-owner cap */
     UINT64 virt;
     XToken tok;
     UINT64 pages;
@@ -290,6 +291,14 @@ int xas_map(XAspace *as, UINT64 virt, XToken tok, UINT32 perms) {
 
     xspin_lock(&g_pt_lock);
 
+    /* Every mapping costs a kernel record (and up to 3 table frames). An
+     * owner must not be able to exhaust them for everyone else. */
+    UINT32 mine = 0;
+    for (int i = 0; i < XAS_MAX_MAPS; i++) {
+        if (g_maps[i].live && g_maps[i].owner == as->owner_id) mine++;
+    }
+    if (mine >= XAS_MAX_MAPS_PER_OWNER) { xspin_unlock(&g_pt_lock); return XAS_ERR_NOMEM; }
+
     UINT64 phys = 0, frames = 0;
     int rc = xtok_map_acquire(tok, as->owner_id, need, &phys, &frames);
     if (rc != XTOK_MAP_OK) { xspin_unlock(&g_pt_lock); return map_err(rc); }
@@ -322,6 +331,7 @@ int xas_map(XAspace *as, UINT64 virt, XToken tok, UINT32 perms) {
     }
 
     rec->as_pml4 = as->pml4_phys;
+    rec->owner   = as->owner_id;
     rec->virt    = virt;
     rec->tok     = tok;
     rec->pages   = frames;
@@ -386,4 +396,12 @@ void xas_destroy(XAspace *as) {
     phys_free_frames(as->pml4_phys, 1);
     as->live = 0;
     xspin_unlock(&g_pt_lock);
+}
+
+UINT32 xas_live_mappings(void) {
+    UINT32 n = 0;
+    xspin_lock(&g_pt_lock);
+    for (int i = 0; i < XAS_MAX_MAPS; i++) if (g_maps[i].live) n++;
+    xspin_unlock(&g_pt_lock);
+    return n;
 }
