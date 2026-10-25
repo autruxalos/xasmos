@@ -44,6 +44,9 @@
 #define XAS_ERR_NOMEM    (-8)   /* no frame for a table / no mapping record   */
 #define XAS_ERR_NOTMAPPED (-9)
 
+/* Mappings one owner may hold at once (code, stack, ... all count). */
+#define XAS_MAX_MAPS_PER_OWNER 64
+
 /* User virtual range: [512 GiB, 128 TiB). */
 #define XAS_USER_BASE  0x0000008000000000ULL
 #define XAS_USER_TOP   0x0000800000000000ULL
@@ -79,5 +82,8 @@ int    xas_unmap(XAspace *as, UINT64 virt);
 /* Kernel-initiated revocation: removes every mapping of tok from every
  * address space. Returns how many mappings were removed. */
 int    xas_revoke_token(XToken tok);
+
+/* Live mapping records across all address spaces (diagnostics, tests). */
+UINT32 xas_live_mappings(void);
 
 #endif
