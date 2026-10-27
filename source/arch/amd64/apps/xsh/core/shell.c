@@ -3,12 +3,6 @@
  * Path: source|arch|amd64|apps|xsh|core|shell.c
  ******************************************************************************/
 
-/* A typed line is the binding limit on 'write', NOT the file capacity:
- * EXFS_DATA_MAX is 4096 (one frame) but one command line carries at most
- * MAX_ARG_LEN-1 bytes, minus the path. Characters past MAX_INPUT_LEN-1 are
- * dropped by xk_readline (they simply stop echoing). Raising these to
- * EXFS_DATA_MAX would need static buffers: ~4 KiB locals would pull in
- * __chkstk. Large payloads will arrive by other means than the keyboard. */
 #define MAX_INPUT_LEN 512
 #define MAX_CMD_LEN   32
 #define MAX_ARG_LEN   480
