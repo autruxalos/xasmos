@@ -14,6 +14,7 @@ OBJS := $(SRCS:%.c=$(BUILD)/obj/%.o)
 CFLAGS := -target x86_64-unknown-windows -ffreestanding -fshort-wchar \
           -mno-red-zone -fno-stack-protector -fno-stack-check -Wall -Wextra \
           -I$(SRC_DIR)/kerncall/include \
+          -I$(SRC_DIR)/arch/amd64/include \
           -I$(SRC_DIR)/arch/amd64/boot/exord/efi \
           -I$(SRC_DIR)/arch/amd64/kernel/xeret
 
