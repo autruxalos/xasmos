@@ -7,9 +7,9 @@ SRCS := arch/amd64/boot/exord/efi/efi_main.c \
         arch/amd64/kernel/xeret/main.c \
         arch/amd64/kernel/xeret/fb_console.c \
         arch/amd64/kernel/xeret/serial.c \
+        arch/amd64/kernel/xeret/idt.c \
         arch/amd64/kernel/xeret/kbd.c \
         arch/amd64/kernel/xeret/kernel_lib.c \
-        arch/amd64/kernel/xeret/idt.c \
         arch/amd64/kernel/xeret/gdt.c \
         arch/amd64/kernel/xeret/lapic.c \
         arch/amd64/kernel/xeret/proc.c \
@@ -28,6 +28,7 @@ OBJS := $(SRCS:%.c=$(BUILD)/obj/%.o)
 CFLAGS := -target x86_64-unknown-windows -ffreestanding -fshort-wchar \
           -mno-red-zone -fno-stack-protector -fno-stack-check -Wall -Wextra \
           -I$(SRC_DIR)/kerncall/include \
+          -I$(SRC_DIR)/arch/amd64/include \
           -I$(SRC_DIR)/arch/amd64/boot/exord/efi \
           -I$(SRC_DIR)/arch/amd64/kernel/xeret
 
@@ -40,7 +41,7 @@ $(EFI_OUT): $(OBJS)
 	lld-link /subsystem:efi_application /entry:efi_main /nodefaultlib /out:$@ $(OBJS)
 
 TEST_EXFS_OBJS := $(filter-out $(BUILD)/obj/arch/amd64/kernel/xeret/main.o,$(OBJS)) \
-                  $(BUILD)/obj/tests/xeret/exfs/exfs_test_main.o
+                  $(BUILD)/obj/tests/arch/amd64/exfs/exfs_test_main.o
 
 test-exfs: $(TEST_EXFS_OBJS)
 	lld-link /subsystem:efi_application /entry:efi_main /nodefaultlib \
