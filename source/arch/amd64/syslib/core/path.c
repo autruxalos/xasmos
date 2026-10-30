@@ -51,3 +51,25 @@ int parse_superdir_path(const char *raw_path, SuperDirPath *out_parsed) {
     out_parsed->token_count = t_idx;
     return (t_idx > 0) ? 0 : -1;
 }
+
+/* Resuelve un destino contra el directorio actual (cwd).
+ * Rutas absolutas empiezan con '|'; las relativas se añaden al cwd. */
+#define RESOLVE_MAX 256
+
+void resolve_superdir_path(const char *cwd, const char *target, char *out_path) {
+    int i = 0, j = 0;
+    if (!target || target[0] == '\0') {
+        while (cwd[i] != '\0' && i < RESOLVE_MAX - 1) { out_path[i] = cwd[i]; i++; }
+        out_path[i] = '\0';
+        return;
+    }
+    if (target[0] == '|') {
+        while (target[i] != '\0' && i < RESOLVE_MAX - 1) { out_path[i] = target[i]; i++; }
+        out_path[i] = '\0';
+        return;
+    }
+    while (cwd[i] != '\0' && i < RESOLVE_MAX - 1) { out_path[i] = cwd[i]; i++; }
+    if (i > 0 && out_path[i - 1] != '|' && i < RESOLVE_MAX - 1) out_path[i++] = '|';
+    while (target[j] != '\0' && i < RESOLVE_MAX - 1) out_path[i++] = target[j++];
+    out_path[i] = '\0';
+}

@@ -96,6 +96,15 @@ static void advance_cursor(void) {
     }
 }
 
+/* Clears the whole framebuffer and homes the cursor. */
+void xk_clear(void) {
+    for (UINT32 y = 0; y < fb_info.height; y++)
+        for (UINT32 x = 0; x < fb_info.width; x++)
+            put_pixel(x, y, FB_COLOR_BLACK);
+    cursor_col = 0;
+    cursor_row = 0;
+}
+
 void xk_putchar(char c) {
     if (c == '\n') {
         cursor_col = 0;
