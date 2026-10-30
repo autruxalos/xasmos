@@ -45,7 +45,7 @@ TEST_EXFS_OBJS := $(filter-out $(BUILD)/obj/arch/amd64/kernel/xeret/main.o,$(OBJ
 
 test-exfs: $(TEST_EXFS_OBJS)
 	lld-link /subsystem:efi_application /entry:efi_main /nodefaultlib \
-	  /out:$(BUILD)/test-exfs.efi $^
+          /out:$(BUILD)/test-exfs.efi $^
 
 .PHONY: efi clean run
 
