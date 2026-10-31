@@ -156,3 +156,9 @@ UINT32 xproc_reap(XAspace *as) {
     xas_destroy(as);
     return total;
 }
+
+/* Exported for the loader backend (load_amd64.c): the limits that
+ * xproc_set_quota and the defaults give to an owner. Read-only. */
+void xproc_quota_get(UINT32 owner, UINT64 *max_frames, UINT32 *max_tokens) {
+    quota_of(owner, max_frames, max_tokens);
+}
