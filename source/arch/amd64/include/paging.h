@@ -1,11 +1,14 @@
 /******************************************************************************
- * XASMOS - xeret page tables and per-owner address spaces
- * Path: source|kerncall|include|paging.h
+ * XASMOS - xeret page tables and per-owner address spaces (amd64)
+ * Path: source/arch/amd64/include/paging.h
  *
  * The kernel identity map (supervisor-only) lives in PML4[0] and is shared by
  * every address space. User mappings live at PML4 index >= 1, built per owner
  * from tokens. A mapping's hardware permissions are DERIVED from the token's
  * rights; nothing else can create one.
+ *
+ * XAspace uses a tag so it matches the opaque forward declaration in
+ * kerncall/include/xload.h. Do not change it to an anonymous struct.
  ******************************************************************************/
 #ifndef XASMOS_PAGING_H
 #define XASMOS_PAGING_H
@@ -56,7 +59,8 @@
 #define XPROT_WP    2u
 #define XPROT_SMEP  4u
 
-typedef struct {
+/* Tagged on purpose: see the header comment. */
+typedef struct XAspace {
     UINT64 pml4_phys;
     UINT32 owner_id;     /* never XTOK_OWNER_KERNEL */
     UINT32 live;
@@ -79,6 +83,7 @@ int    xas_create(XAspace *as, UINT32 owner_id);
 void   xas_destroy(XAspace *as);
 int    xas_map(XAspace *as, UINT64 virt, XToken tok, UINT32 perms);
 int    xas_unmap(XAspace *as, UINT64 virt);
+
 /* Kernel-initiated revocation: removes every mapping of tok from every
  * address space. Returns how many mappings were removed. */
 int    xas_revoke_token(XToken tok);
