@@ -20,10 +20,10 @@ project trademarks by Autruxalos, the original author:
 **You may:**
 - Fork, modify, and redistribute the code under BSD-3-Clause terms.
 - Build your own distribution based on XASMOS and give it its own name.
-- Say your distribution is "based on XASMOS" or "powered by the Wayward
+- Say your distribution is "based on XASMOS" or "powered by the Xeret
   kernel" — factual, attributive statements are always fine.
 - Keep the kernel's own identification (boot messages, `ver` output,
-  copyright headers) referring to Wayward/XASMOS/Autruxalos as originally
+  copyright headers) referring to Xeret/XASMOS/Autruxalos as originally
   written, unmodified.
 
 **You may not:**
