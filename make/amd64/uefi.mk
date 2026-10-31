@@ -28,7 +28,7 @@ SRCS := arch/amd64/boot/exord/efi/efi_main.c \
         arch/amd64/apps/xsh/utils/hexdump.c \
         arch/amd64/syslib/core/path.c \
         arch/amd64/drivers/storage/exfs.c
-        arch/amd64/drivers/storage/exfs.c \
+		arch/amd64/drivers/storage/exfs.c \
         core/xerlibc/src/mem.c \
         core/xerlibc/src/str.c \
         core/xerlibc/src/fmt.c \
