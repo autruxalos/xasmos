@@ -1,8 +1,12 @@
 /******************************************************************************
  * XASMOS - Core Modular Shell Loop (XSH)
- * Path: source|arch|amd64|apps|xsh|core|shell.c
+ * Path: source/arch/amd64/apps/xsh/core/shell.c
  ******************************************************************************/
 
+/* A typed line is the binding limit on 'write', not the file capacity:
+ * EXFS_DATA_MAX is one frame, but one command line carries at most
+ * MAX_ARG_LEN-1 bytes minus the path. Characters past MAX_INPUT_LEN-1 are
+ * dropped by xk_readline. Large payloads arrive by other means. */
 #define MAX_INPUT_LEN 512
 #define MAX_CMD_LEN   32
 #define MAX_ARG_LEN   480
@@ -11,21 +15,28 @@
 #define TYPE_FILE 0
 #define TYPE_DIR  1
 
-/* Kernel services */
+/* Kernel console and keyboard */
 extern void xk_print(const char *str);
 extern int  xk_println(const char *str);
 extern int  xk_readline(char *buffer, int max_chars);
 extern int  xk_strcmp(const char *s1, const char *s2);
 extern void xk_clear(void);
 
-/* Utilities and storage */
-extern int  cmd_remove_main(const char *path);
-extern int  cmd_form_main(const char *flag, const char *path);
+/* Path resolution (path.c) */
 extern void resolve_superdir_path(const char *cwd, const char *target, char *out_path);
-#include "exfs.h"   /* EXFS_DATA_MAX, EXFS_ERR_*, prototypes: one definition */
+
+/* EXFS: capacity and error codes come from exfs.h */
+#include "exfs.h"
+extern int  exfs_stat(const char *raw_path);
+extern int  exfs_enum(const char *dir, void (*cb)(const char *name, int type));
+extern int  exfs_write_data(const char *path, const char *text);
+extern int  exfs_read_data(const char *path, char *out, int max);
+
+/* Every directive implemented in utils/ is declared once, in utils.h */
+#include "../utils/utils.h"
 
 static char current_cwd[MAX_PATH_LEN] = "|";
-static int  is_superuser = 0;                  /* 0 = '@', 1 = '%' */
+static int  is_superuser = 0;          /* 0 = '@', 1 = '%' */
 
 /* ---- helpers ---------------------------------------------------------- */
 
@@ -106,6 +117,7 @@ static void parse_command_line(const char *line, char *cmd, char *arg) {
 /* ---- directives ------------------------------------------------------- */
 
 static int child_counter;
+
 static void count_child(const char *name, int type) {
     (void)name; (void)type;
     child_counter++;
@@ -121,7 +133,7 @@ static void print_child(const char *name, int type) {
 
 static void cmd_ver(void) {
     xk_println("XASMOS xeret 0.1 (amd64, UEFI)");
-    xk_println("directives: ver clear list form remove locate whereami halt");
+    xk_println("directives: ver clear list form remove locate whereami read write echo mem tokens stat hexdump halt");
 }
 
 static void cmd_locate(const char *arg) {
@@ -141,7 +153,7 @@ static void cmd_list(const char *arg) {
     else                resolve_operand(arg, path);
 
     int st = exfs_stat(path);
-    if (st < 0) { fail("EXNOENT", "path unresolved"); return; }
+    if (st < 0)          { fail("EXNOENT", "path unresolved"); return; }
     if (st == TYPE_FILE) { xk_println(path); return; }
 
     child_counter = 0;
@@ -180,7 +192,7 @@ static void cmd_remove(const char *arg) {
     if (arg[0] == '\0') { fail("EXBADARG", "operand required"); return; }
 
     resolve_operand(arg, path);
-    if (is_root(path))  { fail("EXPERM", "root node is immutable"); return; }
+    if (is_root(path)) { fail("EXPERM", "root node is immutable"); return; }
 
     int st = exfs_stat(path);
     if (st < 0) { fail("EXNOENT", "path unresolved"); return; }
@@ -195,10 +207,10 @@ static void cmd_remove(const char *arg) {
 }
 
 static void cmd_write(const char *arg) {
-    char path_tok[MAX_CMD_LEN];
+    char path_tok[MAX_PATH_LEN];
     char path[MAX_PATH_LEN];
 
-    const char *text = split_first(arg, path_tok, MAX_CMD_LEN);
+    const char *text = split_first(arg, path_tok, MAX_PATH_LEN);
     if (path_tok[0] == '\0' || text[0] == '\0') {
         fail("EXBADARG", "usage: write <path> <text>");
         return;
@@ -206,15 +218,14 @@ static void cmd_write(const char *arg) {
 
     resolve_operand(path_tok, path);
     int st = exfs_stat(path);
-    if (st < 0)          { fail("EXNOENT", "path unresolved"); return; }
-    if (st == TYPE_DIR)  { fail("EXISDIR", "target is a directory"); return; }
+    if (st < 0)         { fail("EXNOENT", "path unresolved"); return; }
+    if (st == TYPE_DIR) { fail("EXISDIR", "target is a directory"); return; }
 
     int rc = exfs_write_data(path, text);
     if      (rc == EXFS_ERR_TRUNC)  fail("EXNOSPC", "text truncated to node capacity");
     else if (rc == EXFS_ERR_NOMEM)  fail("EXNOMEM", "no frame available for node data");
     else if (rc == EXFS_ERR_DENIED) fail("EXPERM",  "token refused the write");
     else if (rc < 0)                fail("EXIOERR", "write failed");
-    /* rc == 0: silent success, matches the rest of the directive set */
 }
 
 static void cmd_read(const char *arg) {
@@ -225,13 +236,27 @@ static void cmd_read(const char *arg) {
 
     resolve_operand(arg, path);
     int st = exfs_stat(path);
-    if (st < 0)          { fail("EXNOENT", "path unresolved"); return; }
-    if (st == TYPE_DIR)  { fail("EXISDIR", "target is a directory"); return; }
+    if (st < 0)         { fail("EXNOENT", "path unresolved"); return; }
+    if (st == TYPE_DIR) { fail("EXISDIR", "target is a directory"); return; }
 
-    int n = exfs_read_data(path, buf, sizeof(buf));
+    int n = exfs_read_data(path, buf, EXFS_DATA_MAX);
     if (n == EXFS_ERR_DENIED) { fail("EXPERM", "token refused the read"); return; }
     if (n < 0)                { fail("EXIOERR", "read failed"); return; }
     xk_println(buf);
+}
+
+static void cmd_stat(const char *arg) {
+    char path[MAX_PATH_LEN];
+    if (arg[0] == '\0') { fail("EXBADARG", "usage: stat <path>"); return; }
+    resolve_operand(arg, path);
+    cmd_stat_main(path);
+}
+
+static void cmd_hexdump(const char *arg) {
+    char path[MAX_PATH_LEN];
+    if (arg[0] == '\0') { fail("EXBADARG", "usage: hexdump <path>"); return; }
+    resolve_operand(arg, path);
+    cmd_hexdump_main(path);
 }
 
 /* ---- main loop -------------------------------------------------------- */
@@ -264,6 +289,11 @@ void shell_main(void) {
         else if (streq(command, "remove"))    cmd_remove(argument);
         else if (streq(command, "read"))      cmd_read(argument);
         else if (streq(command, "write"))     cmd_write(argument);
+        else if (streq(command, "echo"))      cmd_echo_main(argument);
+        else if (streq(command, "mem"))       cmd_mem_main();
+        else if (streq(command, "tokens"))    cmd_tokens_main();
+        else if (streq(command, "stat"))      cmd_stat(argument);
+        else if (streq(command, "hexdump"))   cmd_hexdump(argument);
         else if (streq(command, "sysinfo") || streq(command, "sprusr"))
             fail("EXNOSYS", "directive unimplemented");
         else {
