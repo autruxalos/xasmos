@@ -3,8 +3,15 @@
  * Path: source/kerncall/include/xload.h
  *
  * This header is architecture-neutral. It names what the loader does, not how
- * an architecture maps memory: XAspace is opaque here and defined by each
- * architecture (arch/amd64 for now).
+ * an architecture maps memory.
+ *
+ * XAspace is opaque here. Each architecture defines it with the SAME tag:
+ *
+ *     typedef struct XAspace { ...arch fields... } XAspace;
+ *
+ * An anonymous struct (typedef struct { ... } XAspace;) conflicts with the
+ * forward declaration below and does not compile when both headers are
+ * included. This is the rule every arch header must follow.
  *
  * Guarantee (all or nothing):
  *   On success, the image is mapped in the address space and the program is
@@ -23,7 +30,7 @@
 
 #include <stdint.h>
 
-/* Per-architecture address space. Opaque to everything above the arch layer. */
+/* Per-architecture address space. The arch must define it with this tag. */
 typedef struct XAspace XAspace;
 
 /* Load status. Negative values are failures. */
