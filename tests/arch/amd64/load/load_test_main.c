@@ -12,6 +12,7 @@
 #include "paging.h"
 #include "xproc.h"
 #include "xload.h"
+#include "xload_backend.h"
 #include "diag.h"
 #include "prog_exb.h"
 
