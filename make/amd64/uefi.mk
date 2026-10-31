@@ -30,7 +30,10 @@ SRCS := arch/amd64/boot/exord/efi/efi_main.c \
         arch/amd64/drivers/storage/exfs.c \
         core/xerlibc/src/mem.c \
         core/xerlibc/src/str.c \
-        core/xerlibc/src/fmt.c
+        core/xerlibc/src/fmt.c \
+        arch/amd64/kernel/xeret/load_amd64.c \
+        core/exb/exb.c \
+        core/exb/load.c \
 OBJS := $(SRCS:%.c=$(BUILD)/obj/%.o)
 
 CFLAGS := -target x86_64-unknown-windows -ffreestanding -fshort-wchar \
