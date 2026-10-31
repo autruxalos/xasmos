@@ -211,3 +211,11 @@ int exfs_read_data(const char *path, char *out, int max) {
     out[i] = '\0';
     return i;
 }
+
+/* Byte length of a file's data (0 if never written), or -1 if there is no file. */
+int exfs_size(const char *raw_path) {
+    exfs_init();
+    EXFSNode *n = exfs_find(raw_path);
+    if (!n || n->type != TYPE_FILE) return -1;
+    return n->data_len;
+}
