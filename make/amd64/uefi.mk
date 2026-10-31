@@ -51,7 +51,7 @@ $(BUILD)/obj/core/xerlibc/src/%.o: CFLAGS += -fno-builtin -fno-tree-loop-distrib
 $(BUILD)/obj/%.o: $(SRC_DIR)/%.c
 	@mkdir -p $(dir $@)
 	clang $(CFLAGS) -c $< -o $@
-@@@mkdir -p $(dir $@)
+	@@@mkdir -p $(dir $@)
 @@clang $(CFLAGS) -c $< -o $@
 
 $(EFI_OUT): $(OBJS)
