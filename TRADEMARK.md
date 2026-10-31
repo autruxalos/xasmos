@@ -10,7 +10,7 @@ project trademarks by Autruxalos, the original author:
 - XASMOS
 - Xeret (the kernel)
 - Exord (the bootloader)
-- Alembic (the package manager)
+- Alembic (the package manager, once it exists)
 - XSH (the shell)
 - EXFS (the filesystem)
 - Y (the display server, once it exists)
