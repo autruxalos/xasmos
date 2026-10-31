@@ -52,7 +52,7 @@ $(BUILD)/obj/%.o: $(SRC_DIR)/%.c
 	@mkdir -p $(dir $@)
 	clang $(CFLAGS) -c $< -o $@
 	@@@mkdir -p $(dir $@)
-@@clang $(CFLAGS) -c $< -o $@
+	@@clang $(CFLAGS) -c $< -o $@
 
 $(EFI_OUT): $(OBJS)
 	@mkdir -p $(dir $@)
