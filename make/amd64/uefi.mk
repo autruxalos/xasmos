@@ -27,6 +27,7 @@ SRCS := arch/amd64/boot/exord/efi/efi_main.c \
         arch/amd64/apps/xsh/utils/stat.c \
         arch/amd64/apps/xsh/utils/hexdump.c \
         arch/amd64/syslib/core/path.c \
+        arch/amd64/drivers/storage/exfs.c
         arch/amd64/drivers/storage/exfs.c \
         core/xerlibc/src/mem.c \
         core/xerlibc/src/str.c \
@@ -48,10 +49,14 @@ CFLAGS := -target x86_64-unknown-windows -ffreestanding -fshort-wchar \
 $(BUILD)/obj/core/xerlibc/src/%.o: CFLAGS += -fno-builtin -fno-tree-loop-distribute-patterns
 
 $(BUILD)/obj/%.o: $(SRC_DIR)/%.c
+	@mkdir -p $(dir $@)
+	clang $(CFLAGS) -c $< -o $@
 @@@mkdir -p $(dir $@)
 @@clang $(CFLAGS) -c $< -o $@
 
 $(EFI_OUT): $(OBJS)
+	@mkdir -p $(dir $@)
+	lld-link /subsystem:efi_application /entry:efi_main /nodefaultlib /out:$@ $(OBJS)
 @@@mkdir -p $(dir $@)
 @@lld-link /subsystem:efi_application /entry:efi_main /nodefaultlib /out:$@ $(OBJS)
 
@@ -59,6 +64,7 @@ TEST_EXFS_OBJS := $(filter-out $(BUILD)/obj/arch/amd64/kernel/xeret/main.o,$(OBJ
                   $(BUILD)/obj/tests/arch/amd64/exfs/exfs_test_main.o
 
 test-exfs: $(TEST_EXFS_OBJS)
+	lld-link /subsystem:efi_application /entry:efi_main /nodefaultlib \
 @@lld-link /subsystem:efi_application /entry:efi_main /nodefaultlib \
           /out:$(BUILD)/test-exfs.efi $^
 
@@ -67,16 +73,22 @@ test-exfs: $(TEST_EXFS_OBJS)
 efi: $(EFI_OUT)
 
 clean:
+	rm -rf $(BUILD)
 @@rm -rf $(BUILD)
 
 IMG  := $(BUILD)/esp.img
 OVMF ?= /usr/share/edk2/x64/OVMF.4m.fd
 
 $(IMG): $(EFI_OUT)
+	dd if=/dev/zero of=$@ bs=1M count=64 status=none
+	mkfs.fat -F 32 $@ >/dev/null
+	mmd   -i $@ ::/EFI ::/EFI/BOOT
+	mcopy -i $@ $(EFI_OUT) ::/EFI/BOOT/BOOTX64.EFI
 @@dd if=/dev/zero of=$@ bs=1M count=64 status=none
 @@mkfs.fat -F 32 $@ >/dev/null
 @@mmd   -i $@ ::/EFI ::/EFI/BOOT
 @@mcopy -i $@ $(EFI_OUT) ::/EFI/BOOT/BOOTX64.EFI
 
 run: $(IMG)
+	qemu-system-x86_64 -bios $(OVMF) -drive format=raw,file=$(IMG) -m 256M
 @@qemu-system-x86_64 -bios $(OVMF) -drive format=raw,file=$(IMG) -m 256M
