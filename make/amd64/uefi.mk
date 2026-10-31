@@ -57,15 +57,15 @@ $(BUILD)/obj/%.o: $(SRC_DIR)/%.c
 $(EFI_OUT): $(OBJS)
 	@mkdir -p $(dir $@)
 	lld-link /subsystem:efi_application /entry:efi_main /nodefaultlib /out:$@ $(OBJS)
-@@@mkdir -p $(dir $@)
-@@lld-link /subsystem:efi_application /entry:efi_main /nodefaultlib /out:$@ $(OBJS)
+	@@@mkdir -p $(dir $@)
+	@@lld-link /subsystem:efi_application /entry:efi_main /nodefaultlib /out:$@ $(OBJS)
 
 TEST_EXFS_OBJS := $(filter-out $(BUILD)/obj/arch/amd64/kernel/xeret/main.o,$(OBJS)) \
                   $(BUILD)/obj/tests/arch/amd64/exfs/exfs_test_main.o
 
 test-exfs: $(TEST_EXFS_OBJS)
 	lld-link /subsystem:efi_application /entry:efi_main /nodefaultlib \
-@@lld-link /subsystem:efi_application /entry:efi_main /nodefaultlib \
+	@@lld-link /subsystem:efi_application /entry:efi_main /nodefaultlib \
           /out:$(BUILD)/test-exfs.efi $^
 
 .PHONY: efi clean run
