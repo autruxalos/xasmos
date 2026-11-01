@@ -338,6 +338,7 @@ static int dispatch(const char *command, const char *argument) {
     else if (streq(command, "hexdump"))   cmd_hexdump(argument);
     else if (streq(command, "run"))       cmd_run_main(argument);
     else if (streq(command, "pci"))       cmd_pci_main();
+    else if (streq(command, "nvme"))      cmd_nvme_main();
     else if (streq(command, "sysinfo") || streq(command, "exofetch"))
         fail("EXNOSYS", "directive unimplemented");
     else {
