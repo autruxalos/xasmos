@@ -77,6 +77,7 @@ UINT32 xpt_protections(void);
 
 int    xpt_translate(UINT64 virt, UINT64 *out_phys);
 int    xpt_attributes(UINT64 virt, UINT64 *flags);
+int    xpt_map_uncached(UINT64 phys, UINT64 size, UINT64 *virt_out);
 UINT64 xpt_pml4_phys(void);
 UINT64 xpt_read_cr3(void);
 
