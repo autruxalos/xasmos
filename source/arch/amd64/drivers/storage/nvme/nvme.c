@@ -215,7 +215,7 @@ static int identify_namespace(void) {
     if (admin_exec(cmd, &dw3) != BLK_OK) return BLK_E_TIMEOUT;
     if (nvme_cqe_status(dw3) != 0) return BLK_E_IO;
 
-    uint8_t id[BOUNCE_BYTES];
+static uint8_t id[BOUNCE_BYTES];   /* static: a 4 KiB stack frame would need __chkstk */
     copy_out(id, g_nvme.dma, BOUNCE_BYTES);
     uint64_t nsze = nvme_nsze_from_identify(id);
     uint32_t lbads = nvme_lbads_from_identify(id);
