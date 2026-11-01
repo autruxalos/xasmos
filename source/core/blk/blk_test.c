@@ -5,6 +5,7 @@
 #include "blk.h"
 
 typedef struct { unsigned char *mem; uint64_t sectors; uint32_t ss; int fail_next; } Fake;
+
 static int passes, fails;
 #define CHECK(c, ...) do { if (c) passes++; else { fails++; printf("FAIL  " __VA_ARGS__); printf("\n"); } } while (0)
 
@@ -14,12 +15,14 @@ static int f_read(void *c, uint64_t lba, uint32_t n, void *buf) {
     memcpy(buf, f->mem + lba * f->ss, (size_t)n * f->ss);
     return BLK_OK;
 }
+
 static int f_write(void *c, uint64_t lba, uint32_t n, const void *buf) {
     Fake *f = c;
     if (f->fail_next) { f->fail_next = 0; return BLK_E_IO; }
     memcpy(f->mem + lba * f->ss, buf, (size_t)n * f->ss);
     return BLK_OK;
 }
+
 static const BlkOps ops = { f_read, f_write, 0 };
 
 int main(void) {
