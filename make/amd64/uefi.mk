@@ -27,6 +27,8 @@ SRCS := arch/amd64/boot/exord/efi/efi_main.c \
         arch/amd64/apps/xsh/utils/tokens.c \
         arch/amd64/apps/xsh/utils/stat.c \
         arch/amd64/apps/xsh/utils/hexdump.c \
+        arch/amd64/apps/xsh/utils/run.c \
+        arch/amd64/apps/xsh/images/images.c \
         arch/amd64/syslib/core/path.c \
         arch/amd64/drivers/storage/exfs.c \
         core/xerlibc/src/mem.c \
@@ -60,7 +62,7 @@ TEST_EXFS_OBJS := $(filter-out $(BUILD)/obj/arch/amd64/kernel/xeret/main.o,$(OBJ
 
 test-exfs: $(TEST_EXFS_OBJS)
 	lld-link /subsystem:efi_application /entry:efi_main /nodefaultlib \
-          /out:$(BUILD)/test-exfs.efi $^
+	  /out:$(BUILD)/test-exfs.efi $^
 
 .PHONY: efi clean run
 
