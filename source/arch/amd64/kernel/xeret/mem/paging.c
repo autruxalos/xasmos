@@ -2,19 +2,16 @@
  * XASMOS - Page tables and per-owner address spaces (amd64 Long Mode)
  * Path: source|arch|amd64|kernel|xeret|mem|paging.c
  *
- * Kernel identity map: 2 MiB pages, supervisor-only, shared via PML4[0].
- * Device window [0xC0000000, 4 GiB) is always uncached. RAM is cacheable.
- * User mappings: 4 KiB pages built ONLY by xas_map(), whose permissions come
- * from the token's rights:
- *     READ     -> present + user
- *     WRITE    -> + writable
- *     (no EXEC)-> + NX
- * and whose owner must match the address space's owner.
+ * Address-space layout (canonical 48-bit):
+ *   PML4[0]        kernel identity map (RAM, device window, framebuffer)
+ *   PML4[1..255]   user space (per owner, 4 KiB pages from xas_map)
+ *   PML4[256..511] kernel only: PML4[384] is the MMIO window (xpt_map_uncached)
+ * The kernel half is shared with every address space by copying its PML4
+ * entries; the tables they point to are shared, so kernel mappings made later
+ * are visible in every space at once.
  *
  * Lock order (never reversed anywhere):  g_pt_lock  ->  ledger lock
  *                                        g_pt_lock  ->  physical lock
- * The ledger and the physical allocator never call back into this file, and
- * never nest with each other.
  ******************************************************************************/
 #include "kmemory.h"
 #include "paging.h"
@@ -26,6 +23,11 @@
 #define FOUR_GIB      0x100000000ULL
 #define PML4_SPAN     (1ULL << 39)          /* 512 GiB */
 #define XAS_MAX_MAPS  1024
+
+#define XPT_KERNEL_HALF  256                /* first PML4 index of the kernel half */
+#define XPT_MMIO_PML4    384                /* 0xFFFFC00000000000: MMIO window     */
+#define XPT_MMIO_VA      0xFFFFC00000000000ULL
+#define XPT_MMIO_MAX_PAGES 4096ULL          /* 16 MiB per xpt_map_uncached call    */
 
 #define MSR_EFER      0xC0000080u
 #define EFER_NXE      (1ULL << 11)
@@ -44,6 +46,7 @@ typedef struct {
 static UINT64     g_pml4_phys;
 static UINT32     g_prot;
 static MapRec     g_maps[XAS_MAX_MAPS];
+static UINT64     g_mmio_next;              /* next free VA in the MMIO window */
 static XSpinlock  g_pt_lock = XSPINLOCK_INIT;
 
 /* ---- small helpers ------------------------------------------------------ */
@@ -156,7 +159,7 @@ static int map_huge(UINT64 pml4_phys, UINT64 start, UINT64 end, UINT64 flags) {
 int xpt_init_identity(UINT64 phys_end, UINT64 extra_base, UINT64 extra_size) {
     if (phys_end == 0) return -1;
 
-    /* Per-owner address spaces share PML4[0], so the kernel map must fit it. */
+    /* The identity map lives in PML4[0]; it must fit inside that entry. */
     if (align_up(phys_end, XERET_HUGE_SIZE) > PML4_SPAN) return -1;
     if (extra_size != 0 && (extra_base + extra_size > PML4_SPAN || extra_base + extra_size < extra_base)) return -1;
 
@@ -187,8 +190,13 @@ int xpt_init_identity(UINT64 phys_end, UINT64 extra_base, UINT64 extra_size) {
                      XPT_KERNEL_RW | XPT_GLOBAL) != 0) return -1;
     }
 
+    /* The MMIO window's PDPT is created now, so every address space that copies
+     * this PML4 entry shares it: later xpt_map_uncached calls are visible to all. */
+    if (next_level(tbl(pml4_phys), XPT_MMIO_PML4, XPT_KERNEL_RW) == 0) return -1;
+
     write_cr3(pml4_phys);
     g_pml4_phys = pml4_phys;
+    g_mmio_next = XPT_MMIO_VA;
     return 0;
 }
 
@@ -206,8 +214,8 @@ int xpt_translate(UINT64 virt, UINT64 *out_phys) {
     return 0;
 }
 
-/* Returns the leaf entry of a kernel identity mapping (its flags are the
- * attributes: XPT_UC means uncached). -1 if virt is not mapped. */
+/* Returns the leaf entry for a kernel mapping (2 MiB or 4 KiB). Its flags are
+ * the attributes: XPT_UC means uncached, XPT_NX means not executable. */
 int xpt_attributes(UINT64 virt, UINT64 *flags) {
     if (g_pml4_phys == 0 || !flags) return -1;
 
@@ -216,9 +224,54 @@ int xpt_attributes(UINT64 virt, UINT64 *flags) {
     e = tbl(e & XPT_ADDR_MASK)[(virt >> 30) & 0x1FF];
     if (!(e & XPT_PRESENT)) return -1;
     e = tbl(e & XPT_ADDR_MASK)[(virt >> 21) & 0x1FF];
-    if (!(e & XPT_PRESENT) || !(e & XPT_HUGE)) return -1;
+    if (!(e & XPT_PRESENT)) return -1;
+    if (!(e & XPT_HUGE)) {
+        e = tbl(e & XPT_ADDR_MASK)[(virt >> 12) & 0x1FF];
+        if (!(e & XPT_PRESENT)) return -1;
+    }
 
     *flags = e;
+    return 0;
+}
+
+/* Maps [phys, phys+size) uncached and non-executable in the kernel's MMIO
+ * window, in 4 KiB pages. Returns the virtual address of phys (its offset
+ * within the first page is kept). Visible in every address space at once. */
+int xpt_map_uncached(UINT64 phys, UINT64 size, UINT64 *virt_out) {
+    if (g_pml4_phys == 0 || size == 0 || !virt_out) return -1;
+
+    UINT64 start = align_down(phys, XERET_FRAME_SIZE);
+    if (phys + size < phys) return -1;                 /* wrap-around */
+    UINT64 end = align_up(phys + size, XERET_FRAME_SIZE);
+    UINT64 pages = (end - start) / XERET_FRAME_SIZE;
+    if (pages == 0 || pages > XPT_MMIO_MAX_PAGES) return -1;
+
+    xspin_lock(&g_pt_lock);
+    UINT64 base = g_mmio_next;
+    if (base + pages * XERET_FRAME_SIZE < base ||
+        base + pages * XERET_FRAME_SIZE > 0xFFFFC00000000000ULL + PML4_SPAN) {
+        xspin_unlock(&g_pt_lock);
+        return -1;
+    }
+
+    volatile UINT64 *pml4 = tbl(g_pml4_phys);
+    volatile UINT64 *pdpt = tbl(pml4[XPT_MMIO_PML4] & XPT_ADDR_MASK);
+    const UINT64 flags = XPT_KERNEL_RW | XPT_GLOBAL | XPT_UC | XPT_NX;
+
+    for (UINT64 i = 0; i < pages; i++) {
+        UINT64 va = base + i * XERET_FRAME_SIZE;
+        volatile UINT64 *pd = next_level(pdpt, (va >> 30) & 0x1FF, XPT_KERNEL_RW);
+        if (!pd) { xspin_unlock(&g_pt_lock); return -1; }
+        volatile UINT64 *pt = next_level(pd, (va >> 21) & 0x1FF, XPT_KERNEL_RW);
+        if (!pt) { xspin_unlock(&g_pt_lock); return -1; }
+        UINT64 idx = (va >> 12) & 0x1FF;
+        if (pt[idx] & XPT_PRESENT) { xspin_unlock(&g_pt_lock); return -1; }
+        pt[idx] = ((start + i * XERET_FRAME_SIZE) & XPT_ADDR_MASK) | flags;
+    }
+
+    g_mmio_next = base + pages * XERET_FRAME_SIZE;
+    *virt_out = base + (phys - start);
+    xspin_unlock(&g_pt_lock);
     return 0;
 }
 
@@ -285,10 +338,11 @@ int xas_create(XAspace *as, UINT32 owner_id) {
     UINT64 pml4_phys = alloc_zero_table();
     if (pml4_phys == 0) { xspin_unlock(&g_pt_lock); return XAS_ERR_NOMEM; }
 
-    /* The kernel must live entirely in PML4[0]; share it, supervisor-only. */
+    /* The user half (PML4[1..255]) must be empty in the kernel map. The kernel
+     * half is shared: identity map in [0] and the MMIO window in [256..511]. */
     volatile UINT64 *kp = tbl(g_pml4_phys);
     volatile UINT64 *np = tbl(pml4_phys);
-    for (UINT64 i = 1; i < XPT_ENTS; i++) {
+    for (UINT64 i = 1; i < XPT_KERNEL_HALF; i++) {
         if (kp[i] & XPT_PRESENT) {
             phys_free_frames(pml4_phys, 1);
             xspin_unlock(&g_pt_lock);
@@ -296,6 +350,7 @@ int xas_create(XAspace *as, UINT32 owner_id) {
         }
     }
     np[0] = kp[0];
+    for (UINT64 i = XPT_KERNEL_HALF; i < XPT_ENTS; i++) np[i] = kp[i];
 
     as->pml4_phys = pml4_phys;
     as->owner_id  = owner_id;
@@ -409,9 +464,10 @@ void xas_destroy(XAspace *as) {
         if (g_maps[i].live && g_maps[i].as_pml4 == as->pml4_phys) drop_record(&g_maps[i]);
     }
 
-    /* Free the user-half tables; PML4[0] is the shared kernel map: not ours. */
+    /* Free only the user half. PML4[0] and PML4[256..511] are shared with the
+     * kernel: their tables belong to the kernel, not to this space. */
     volatile UINT64 *pml4 = tbl(as->pml4_phys);
-    for (UINT64 i4 = 1; i4 < XPT_ENTS; i4++) {
+    for (UINT64 i4 = 1; i4 < XPT_KERNEL_HALF; i4++) {
         if (!(pml4[i4] & XPT_PRESENT)) continue;
         UINT64 pdpt_phys = pml4[i4] & XPT_ADDR_MASK;
         volatile UINT64 *pdpt = tbl(pdpt_phys);
