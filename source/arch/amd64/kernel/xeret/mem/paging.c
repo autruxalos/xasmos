@@ -3,6 +3,7 @@
  * Path: source|arch|amd64|kernel|xeret|mem|paging.c
  *
  * Kernel identity map: 2 MiB pages, supervisor-only, shared via PML4[0].
+ * Device window [0xC0000000, 4 GiB) is always uncached. RAM is cacheable.
  * User mappings: 4 KiB pages built ONLY by xas_map(), whose permissions come
  * from the token's rights:
  *     READ     -> present + user
@@ -22,7 +23,6 @@
 #define XPT_ENTS      512ULL
 #define XPT_ADDR_MASK 0x000FFFFFFFFFF000ULL
 #define XPT_HUGE_MASK 0x000FFFFFFFE00000ULL
-#define LAPIC_IOAPIC_BASE 0xFEC00000ULL
 #define FOUR_GIB      0x100000000ULL
 #define PML4_SPAN     (1ULL << 39)          /* 512 GiB */
 #define XAS_MAX_MAPS  1024
@@ -149,6 +149,10 @@ static int map_huge(UINT64 pml4_phys, UINT64 start, UINT64 end, UINT64 flags) {
     return 0;
 }
 
+/* XPT_MMIO_BASE: the device window below 4 GiB. Registers of NVMe, AHCI and
+ * xHCI live here, so it is always mapped uncached, whatever the amount of RAM. */
+#define XPT_MMIO_BASE 0xC0000000ULL
+
 int xpt_init_identity(UINT64 phys_end, UINT64 extra_base, UINT64 extra_size) {
     if (phys_end == 0) return -1;
 
@@ -161,14 +165,27 @@ int xpt_init_identity(UINT64 phys_end, UINT64 extra_base, UINT64 extra_size) {
     UINT64 pml4_phys = alloc_zero_table();
     if (pml4_phys == 0) return -1;
 
-    if (map_huge(pml4_phys, 0, align_up(phys_end, XERET_HUGE_SIZE),
-                 XPT_KERNEL_RW | XPT_GLOBAL) != 0) return -1;
+    /* First mapping wins: the uncached regions are mapped before RAM, so a
+     * device register or the framebuffer is never reached through a cacheable
+     * alias, even when it sits inside the range of installed RAM. */
+    if (map_huge(pml4_phys, XPT_MMIO_BASE, FOUR_GIB,
+                 XPT_KERNEL_RW | XPT_GLOBAL | XPT_UC) != 0) return -1;
+
     if (extra_size != 0) {
         if (map_huge(pml4_phys, extra_base, extra_base + extra_size,
                      XPT_KERNEL_RW | XPT_GLOBAL | XPT_UC) != 0) return -1;
     }
-    if (map_huge(pml4_phys, LAPIC_IOAPIC_BASE, FOUR_GIB,
-                 XPT_KERNEL_RW | XPT_GLOBAL | XPT_UC) != 0) return -1;
+
+    /* RAM below the device window. */
+    UINT64 low_end = (phys_end < XPT_MMIO_BASE) ? phys_end : XPT_MMIO_BASE;
+    if (map_huge(pml4_phys, 0, align_up(low_end, XERET_HUGE_SIZE),
+                 XPT_KERNEL_RW | XPT_GLOBAL) != 0) return -1;
+
+    /* RAM above 4 GiB: the region the chipset remaps above the device window. */
+    if (phys_end > FOUR_GIB) {
+        if (map_huge(pml4_phys, FOUR_GIB, align_up(phys_end, XERET_HUGE_SIZE),
+                     XPT_KERNEL_RW | XPT_GLOBAL) != 0) return -1;
+    }
 
     write_cr3(pml4_phys);
     g_pml4_phys = pml4_phys;
@@ -186,6 +203,22 @@ int xpt_translate(UINT64 virt, UINT64 *out_phys) {
     if (!(e & XPT_PRESENT) || !(e & XPT_HUGE)) return -1;
 
     if (out_phys) *out_phys = (e & XPT_HUGE_MASK) | (virt & (XERET_HUGE_SIZE - 1));
+    return 0;
+}
+
+/* Returns the leaf entry of a kernel identity mapping (its flags are the
+ * attributes: XPT_UC means uncached). -1 if virt is not mapped. */
+int xpt_attributes(UINT64 virt, UINT64 *flags) {
+    if (g_pml4_phys == 0 || !flags) return -1;
+
+    UINT64 e = tbl(g_pml4_phys)[(virt >> 39) & 0x1FF];
+    if (!(e & XPT_PRESENT)) return -1;
+    e = tbl(e & XPT_ADDR_MASK)[(virt >> 30) & 0x1FF];
+    if (!(e & XPT_PRESENT)) return -1;
+    e = tbl(e & XPT_ADDR_MASK)[(virt >> 21) & 0x1FF];
+    if (!(e & XPT_PRESENT) || !(e & XPT_HUGE)) return -1;
+
+    *flags = e;
     return 0;
 }
 
