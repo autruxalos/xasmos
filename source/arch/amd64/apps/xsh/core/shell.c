@@ -2,10 +2,14 @@
  * XASMOS - Core Modular Shell Loop (XSH)
  * Path: source/arch/amd64/apps/xsh/core/shell.c
  *
- * Users: the default account is "xent". "sprusr" is both a command and an
- * account: it switches the session to superuser mode. There is NO
- * authentication yet and no persistence, so this is a privilege label, not a
- * security boundary. See PENDING in the release notes.
+ * Identity model (no authentication or persistence yet: this is a session
+ * label, not a security boundary):
+ *   xent     default account
+ *   sprusr   superuser account, both a command and an account:
+ *              sprusr            login as superuser (like 'su -')
+ *              sprusr <cmd> ...  run one command as superuser, then return
+ *                                (like 'sudo'); the current cwd is kept
+ *              xent              login back as xent (like 'su - xent')
  ******************************************************************************/
 
 /* A typed line is the binding limit on 'write', not the file capacity:
@@ -34,19 +38,17 @@ extern void xk_clear(void);
 /* Path resolution (path.c) */
 extern void resolve_superdir_path(const char *cwd, const char *target, char *out_path);
 
-/* EXFS: capacity and error codes come from exfs.h */
+/* EXFS: capacity, error codes and prototypes come from exfs.h */
 #include "exfs.h"
-extern int  exfs_stat(const char *raw_path);
-extern int  exfs_enum(const char *dir, void (*cb)(const char *name, int type));
-extern int  exfs_write_data(const char *path, const char *text);
-extern int  exfs_read_data(const char *path, char *out, int max);
 
 /* Every directive implemented in utils/ is declared once, in utils.h */
 #include "../utils/utils.h"
 
-static char current_cwd[MAX_PATH_LEN] = "|";
+static char current_cwd[MAX_PATH_LEN]  = "|";
 static char current_user[MAX_USER_LEN] = DEFAULT_USER;
 static int  is_superuser = 0;
+
+static int dispatch(const char *command, const char *argument);
 
 /* ---- helpers ---------------------------------------------------------- */
 
@@ -124,6 +126,11 @@ static void parse_command_line(const char *line, char *cmd, char *arg) {
     while (n > 0 && arg[n - 1] == ' ') arg[--n] = '\0';   /* trim trailing blanks */
 }
 
+static void set_identity(const char *name, int super) {
+    copy_str(current_user, name, MAX_USER_LEN);
+    is_superuser = super;
+}
+
 /* ---- directives ------------------------------------------------------- */
 
 static int child_counter;
@@ -148,19 +155,39 @@ static void cmd_ver(void) {
 
 static void cmd_whoami(void) {
     xk_print(current_user);
-    xk_println(is_superuser ? " (superuser mode)" : "");
+    xk_println(is_superuser ? " (superuser)" : "");
 }
 
-static void cmd_sprusr(void) {
-    copy_str(current_user, SUPER_USER, MAX_USER_LEN);
-    is_superuser = 1;
-    xk_println("superuser mode: sprusr. No authentication yet.");
+/* sprusr: login (no argument) or one-shot command (sudo-style). */
+static int cmd_sprusr(const char *arg) {
+    if (arg[0] == '\0') {
+        set_identity(SUPER_USER, 1);
+        copy_str(current_cwd, "|", MAX_PATH_LEN);      /* login resets to the root */
+        xk_println("login: sprusr (superuser). 'xent' returns to the default account.");
+        return 0;
+    }
+
+    char saved_user[MAX_USER_LEN];
+    int  saved_super = is_superuser;
+    copy_str(saved_user, current_user, MAX_USER_LEN);
+
+    char cmd[MAX_CMD_LEN];
+    const char *rest = split_first(arg, cmd, MAX_CMD_LEN);
+    if (cmd[0] == '\0') {
+        fail("EXBADARG", "usage: sprusr [command [args...]]");
+        return 0;
+    }
+
+    set_identity(SUPER_USER, 1);
+    int halted = dispatch(cmd, rest);              /* cwd is deliberately not touched */
+    set_identity(saved_user, saved_super);
+    return halted;
 }
 
 static void cmd_xent(void) {
-    copy_str(current_user, DEFAULT_USER, MAX_USER_LEN);
-    is_superuser = 0;
-    xk_println("back to xent");
+    set_identity(DEFAULT_USER, 0);
+    copy_str(current_cwd, "|", MAX_PATH_LEN);
+    xk_println("login: xent");
 }
 
 static void cmd_locate(const char *arg) {
@@ -286,6 +313,39 @@ static void cmd_hexdump(const char *arg) {
     cmd_hexdump_main(path);
 }
 
+/* ---- dispatcher ------------------------------------------------------- */
+
+/* Runs one directive. Returns 1 if the shell must halt, 0 otherwise. */
+static int dispatch(const char *command, const char *argument) {
+    if      (streq(command, "halt"))      { xk_println("Halting XASMOS."); return 1; }
+    else if (streq(command, "ver"))       cmd_ver();
+    else if (streq(command, "clear"))     xk_clear();
+    else if (streq(command, "whereami"))  { xk_print("Current SuperDir: "); xk_println(current_cwd); }
+    else if (streq(command, "whoami"))    cmd_whoami();
+    else if (streq(command, "sprusr"))    return cmd_sprusr(argument);
+    else if (streq(command, "xent"))      cmd_xent();
+    else if (streq(command, "locate") ||
+             streq(command, "ubicate"))   cmd_locate(argument);   /* legacy alias */
+    else if (streq(command, "list"))      cmd_list(argument);
+    else if (streq(command, "form"))      cmd_form(argument);
+    else if (streq(command, "remove"))    cmd_remove(argument);
+    else if (streq(command, "read"))      cmd_read(argument);
+    else if (streq(command, "write"))     cmd_write(argument);
+    else if (streq(command, "echo"))      cmd_echo_main(argument);
+    else if (streq(command, "mem"))       cmd_mem_main();
+    else if (streq(command, "tokens"))    cmd_tokens_main();
+    else if (streq(command, "stat"))      cmd_stat(argument);
+    else if (streq(command, "hexdump"))   cmd_hexdump(argument);
+    else if (streq(command, "run"))       cmd_run_main(argument);
+    else if (streq(command, "sysinfo") || streq(command, "exofetch"))
+        fail("EXNOSYS", "directive unimplemented");
+    else {
+        xk_print("EXBADCMD: unrecognized directive: ");
+        xk_println(command);
+    }
+    return 0;
+}
+
 /* ---- main loop -------------------------------------------------------- */
 
 void shell_main(void) {
@@ -307,32 +367,7 @@ void shell_main(void) {
         parse_command_line(input_line, command, argument);
         if (command[0] == '\0') continue;
 
-        if      (streq(command, "halt"))      { xk_println("Halting XASMOS."); break; }
-        else if (streq(command, "ver"))       cmd_ver();
-        else if (streq(command, "clear"))     xk_clear();
-        else if (streq(command, "whereami"))  { xk_print("Current SuperDir: "); xk_println(current_cwd); }
-        else if (streq(command, "whoami"))    cmd_whoami();
-        else if (streq(command, "sprusr"))    cmd_sprusr();
-        else if (streq(command, "xent"))      cmd_xent();
-        else if (streq(command, "locate") ||
-                 streq(command, "ubicate"))   cmd_locate(argument);   /* legacy alias */
-        else if (streq(command, "list"))      cmd_list(argument);
-        else if (streq(command, "form"))      cmd_form(argument);
-        else if (streq(command, "remove"))    cmd_remove(argument);
-        else if (streq(command, "read"))      cmd_read(argument);
-        else if (streq(command, "write"))     cmd_write(argument);
-        else if (streq(command, "echo"))      cmd_echo_main(argument);
-        else if (streq(command, "mem"))       cmd_mem_main();
-        else if (streq(command, "tokens"))    cmd_tokens_main();
-        else if (streq(command, "stat"))      cmd_stat(argument);
-        else if (streq(command, "hexdump"))   cmd_hexdump(argument);
-        else if (streq(command, "run"))       cmd_run_main(argument);
-        else if (streq(command, "sysinfo") || streq(command, "exofetch"))
-            fail("EXNOSYS", "directive unimplemented");
-        else {
-            xk_print("EXBADCMD: unrecognized directive: ");
-            xk_println(command);
-        }
+        if (dispatch(command, argument)) break;
     }
 
     xk_println("System halted.");
