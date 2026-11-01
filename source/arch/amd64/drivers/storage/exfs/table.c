@@ -1,39 +1,68 @@
 /******************************************************************************
- * XASMOS - EXFS internal interface (shared by table.c, path.c, data.c)
- * Path: source/arch/amd64/drivers/storage/exfs/exfs_internal.h
+ * XASMOS - EXFS node table: create, delete, stat, lookup
+ * Path: source/arch/amd64/drivers/storage/exfs/table.c
  *
- * Not for callers outside this directory. Everything else goes through exfs.h.
+ * The root "|" is node 0 and is never deleted. Requires xtok_init() first:
+ * a node's frame is released through the ledger when the node is deleted.
  ******************************************************************************/
-#ifndef XASMOS_EXFS_INTERNAL_H
-#define XASMOS_EXFS_INTERNAL_H
+#include "exfs_internal.h"
 
-#include "capability.h"
-#include "exfs.h"
+EXFSNode exfs_table[MAX_NODES];
+static int exfs_initialized = 0;
 
-#define MAX_NODES    128
-#define MAX_PATH_LEN 256
-#define TYPE_FILE    0
-#define TYPE_DIR     1
+void exfs_init(void) {
+    if (exfs_initialized) return;
+    for (int i = 0; i < MAX_NODES; i++) {
+        exfs_table[i].active   = 0;
+        exfs_table[i].data_tok = XTOKEN_INVALID;
+        exfs_table[i].data_len = 0;
+    }
+    exfs_table[0].active  = 1;
+    exfs_table[0].type    = TYPE_DIR;
+    exfs_table[0].path[0] = '|';
+    exfs_table[0].path[1] = '\0';
+    exfs_initialized = 1;
+}
 
-typedef struct {
-    char   path[MAX_PATH_LEN];
-    int    type;
-    int    active;
-    XToken data_tok;     /* XTOKEN_INVALID until the first write */
-    int    data_len;
-} EXFSNode;
+EXFSNode *exfs_find(const char *path) {
+    for (int i = 0; i < MAX_NODES; i++) {
+        if (exfs_table[i].active && exfs_strequal(exfs_table[i].path, path)) {
+            return &exfs_table[i];
+        }
+    }
+    return 0;
+}
 
-extern EXFSNode exfs_table[MAX_NODES];
+int exfs_create_object(const char *raw_path, int type) {
+    exfs_init();
+    for (int i = 0; i < MAX_NODES; i++) {
+        if (!exfs_table[i].active) {
+            exfs_table[i].active   = 1;
+            exfs_table[i].type     = type;
+            exfs_table[i].data_tok = XTOKEN_INVALID;   /* no frame until first write */
+            exfs_table[i].data_len = 0;
+            exfs_strcpy(exfs_table[i].path, raw_path);
+            return 0;
+        }
+    }
+    return -1;   /* node table full */
+}
 
-/* table.c */
-EXFSNode *exfs_find(const char *path);            /* active node with this exact path, or 0 */
+/* Returns 0 on success, -1 if absent or if the frame could not be returned.
+ * On failure the node stays intact, so a frame is never leaked silently. */
+int exfs_delete_object(const char *raw_path) {
+    exfs_init();
+    EXFSNode *n = exfs_find(raw_path);
+    if (!n) return -1;
+    if (exfs_data_release(n) != 0) return -1;
+    n->data_len = 0;
+    n->active   = 0;
+    return 0;
+}
 
-/* path.c */
-void exfs_strcpy(char *dest, const char *src);
-int  exfs_strequal(const char *s1, const char *s2);
-
-/* data.c: returns the node's frame to the ledger. 0 on success (or nothing
- * to return); -1 if the ledger refuses, and then the node keeps its frame. */
-int  exfs_data_release(EXFSNode *n);
-
-#endif /* XASMOS_EXFS_INTERNAL_H */
+/* Returns -1 if no active node has exactly this path, else TYPE_FILE/TYPE_DIR. */
+int exfs_stat(const char *raw_path) {
+    exfs_init();
+    EXFSNode *n = exfs_find(raw_path);
+    return n ? n->type : -1;
+}
