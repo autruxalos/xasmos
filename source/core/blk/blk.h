@@ -28,10 +28,10 @@ typedef struct BlkOps {
 } BlkOps;
 
 typedef struct BlkDev {
-    void          *ctx;       /* driver state, passed back to every op          */
+    void          *ctx;          /* driver state, passed back to every op          */
     const BlkOps  *ops;
-    uint32_t       sector_size;   /* bytes per block, e.g. 512 or 4096        */
-    uint64_t       sector_count;  /* number of blocks                         */
+    uint32_t       sector_size;  /* bytes per block, e.g. 512 or 4096              */
+    uint64_t       sector_count; /* number of blocks                               */
 } BlkDev;
 
 int      blk_read(BlkDev *d, uint64_t lba, uint32_t count, void *buf);
