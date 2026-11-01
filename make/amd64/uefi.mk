@@ -40,6 +40,7 @@ SRCS := arch/amd64/boot/exord/efi/efi_main.c \
         core/xerlibc/src/mem.c \
         core/xerlibc/src/str.c \
         core/xerlibc/src/fmt.c \
+        core/blk/blk.c \
         core/exb/exb.c \
         core/exb/load.c
 OBJS := $(SRCS:%.c=$(BUILD)/obj/%.o)
