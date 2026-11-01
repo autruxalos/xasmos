@@ -4,7 +4,7 @@
  * Path: source/arch/amd64/apps/xsh/utils/pci.c
  ******************************************************************************/
 #include "common.h"
-#include "pci.h"
+#include "../../../drivers/pci/pci.h"
 
 int cmd_pci_main(void) {
     int n = pci_scan();
