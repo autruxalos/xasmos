@@ -18,6 +18,7 @@ SRCS := arch/amd64/boot/exord/efi/efi_main.c \
         arch/amd64/kernel/xeret/mem/physical.c \
         arch/amd64/kernel/xeret/mem/paging.c \
         arch/amd64/kernel/xeret/mem/token_ledger.c \
+        arch/amd64/drivers/pci/pci.c \
         arch/amd64/init/exit.c \
         arch/amd64/apps/xsh/core/shell.c \
         arch/amd64/apps/xsh/utils/form.c \
@@ -28,18 +29,17 @@ SRCS := arch/amd64/boot/exord/efi/efi_main.c \
         arch/amd64/apps/xsh/utils/stat.c \
         arch/amd64/apps/xsh/utils/hexdump.c \
         arch/amd64/apps/xsh/utils/run.c \
+        arch/amd64/apps/xsh/utils/pci.c \
         arch/amd64/apps/xsh/images/images.c \
         arch/amd64/syslib/core/path.c \
         arch/amd64/drivers/storage/exfs/table.c \
         arch/amd64/drivers/storage/exfs/path.c \
         arch/amd64/drivers/storage/exfs/data.c \
-		core/xerlibc/src/mem.c \
+        core/xerlibc/src/mem.c \
         core/xerlibc/src/str.c \
         core/xerlibc/src/fmt.c \
         core/exb/exb.c \
-        core/exb/load.c \
-        arch/amd64/drivers/pci/pci.c \
-        arch/amd64/apps/xsh/utils/pci.c \
+        core/exb/load.c
 OBJS := $(SRCS:%.c=$(BUILD)/obj/%.o)
 
 CFLAGS := -target x86_64-unknown-windows -ffreestanding -fshort-wchar \
