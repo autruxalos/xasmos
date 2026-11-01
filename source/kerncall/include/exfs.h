@@ -1,10 +1,12 @@
 /******************************************************************************
  * XASMOS - EXFS public interface
- * Path: source|kerncall|include|exfs.h
+ * Path: source/kerncall/include/exfs.h
  *
  * Single source of truth for the per-file capacity and the return codes.
- * exfs.c and shell.c both include this: the capacity used to be #defined
- * separately in each, which silently diverges the first time one changes.
+ * The implementation lives in source/arch/amd64/drivers/storage/exfs/:
+ *   table.c  nodes: create, delete, stat, lookup
+ *   path.c   string helpers and directory listing
+ *   data.c   file content on token frames: write, read, size
  ******************************************************************************/
 #ifndef XASMOS_EXFS_H
 #define XASMOS_EXFS_H
@@ -25,5 +27,6 @@ int  exfs_stat(const char *raw_path);   /* -1 absent, else TYPE_FILE/TYPE_DIR */
 int  exfs_enum(const char *dir, void (*cb)(const char *name, int type));
 int  exfs_write_data(const char *path, const char *text);
 int  exfs_read_data(const char *path, char *out, int max);
+int  exfs_size(const char *raw_path);   /* bytes stored, 0 if never written, -1 if no file */
 
 #endif /* XASMOS_EXFS_H */
