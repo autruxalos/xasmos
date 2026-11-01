@@ -30,6 +30,8 @@ SRCS := arch/amd64/boot/exord/efi/efi_main.c \
         arch/amd64/apps/xsh/utils/hexdump.c \
         arch/amd64/apps/xsh/utils/run.c \
         arch/amd64/apps/xsh/utils/pci.c \
+        arch/amd64/drivers/storage/nvme/nvme.c \
+        arch/amd64/apps/xsh/utils/nvme.c \
         arch/amd64/apps/xsh/images/images.c \
         arch/amd64/syslib/core/path.c \
         arch/amd64/drivers/storage/exfs/table.c \
