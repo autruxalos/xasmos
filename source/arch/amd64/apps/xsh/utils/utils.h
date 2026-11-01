@@ -12,5 +12,6 @@ int cmd_stat_main(const char *path);
 int cmd_hexdump_main(const char *path);
 int cmd_run_main(const char *name);
 int cmd_pci_main(void);
+int cmd_nvme_main(void);
 
 #endif
