@@ -1,6 +1,11 @@
 /******************************************************************************
  * XASMOS - Core Modular Shell Loop (XSH)
  * Path: source/arch/amd64/apps/xsh/core/shell.c
+ *
+ * Users: the default account is "xent". "sprusr" is both a command and an
+ * account: it switches the session to superuser mode. There is NO
+ * authentication yet and no persistence, so this is a privilege label, not a
+ * security boundary. See PENDING in the release notes.
  ******************************************************************************/
 
 /* A typed line is the binding limit on 'write', not the file capacity:
@@ -11,9 +16,13 @@
 #define MAX_CMD_LEN   32
 #define MAX_ARG_LEN   480
 #define MAX_PATH_LEN  256
+#define MAX_USER_LEN  16
 
 #define TYPE_FILE 0
 #define TYPE_DIR  1
+
+#define DEFAULT_USER "xent"
+#define SUPER_USER   "sprusr"
 
 /* Kernel console and keyboard */
 extern void xk_print(const char *str);
@@ -36,7 +45,8 @@ extern int  exfs_read_data(const char *path, char *out, int max);
 #include "../utils/utils.h"
 
 static char current_cwd[MAX_PATH_LEN] = "|";
-static int  is_superuser = 0;          /* 0 = '@', 1 = '%' */
+static char current_user[MAX_USER_LEN] = DEFAULT_USER;
+static int  is_superuser = 0;
 
 /* ---- helpers ---------------------------------------------------------- */
 
@@ -132,8 +142,25 @@ static void print_child(const char *name, int type) {
 }
 
 static void cmd_ver(void) {
-    xk_println("XASMOS xeret 0.1 (amd64, UEFI)");
-    xk_println("directives: ver clear list form remove locate whereami read write echo mem tokens stat hexdump halt");
+    xk_println("XASMOS xeret 0.05 (amd64, UEFI)");
+    xk_println("directives: ver clear list form remove locate whereami read write echo mem tokens stat hexdump run whoami sprusr xent halt");
+}
+
+static void cmd_whoami(void) {
+    xk_print(current_user);
+    xk_println(is_superuser ? " (superuser mode)" : "");
+}
+
+static void cmd_sprusr(void) {
+    copy_str(current_user, SUPER_USER, MAX_USER_LEN);
+    is_superuser = 1;
+    xk_println("superuser mode: sprusr. No authentication yet.");
+}
+
+static void cmd_xent(void) {
+    copy_str(current_user, DEFAULT_USER, MAX_USER_LEN);
+    is_superuser = 0;
+    xk_println("back to xent");
 }
 
 static void cmd_locate(const char *arg) {
@@ -266,9 +293,11 @@ void shell_main(void) {
     char command[MAX_CMD_LEN];
     char argument[MAX_ARG_LEN];
 
-    xk_println("XASMOS Shell v0.3 -- 'ver' lists directives");
+    xk_println("XASMOS Shell v0.05 -- 'ver' lists directives");
 
     while (1) {
+        xk_print(current_user);
+        xk_print(":");
         xk_print(current_cwd);
         xk_print(is_superuser ? "% " : "@ ");
 
@@ -282,6 +311,9 @@ void shell_main(void) {
         else if (streq(command, "ver"))       cmd_ver();
         else if (streq(command, "clear"))     xk_clear();
         else if (streq(command, "whereami"))  { xk_print("Current SuperDir: "); xk_println(current_cwd); }
+        else if (streq(command, "whoami"))    cmd_whoami();
+        else if (streq(command, "sprusr"))    cmd_sprusr();
+        else if (streq(command, "xent"))      cmd_xent();
         else if (streq(command, "locate") ||
                  streq(command, "ubicate"))   cmd_locate(argument);   /* legacy alias */
         else if (streq(command, "list"))      cmd_list(argument);
@@ -294,7 +326,8 @@ void shell_main(void) {
         else if (streq(command, "tokens"))    cmd_tokens_main();
         else if (streq(command, "stat"))      cmd_stat(argument);
         else if (streq(command, "hexdump"))   cmd_hexdump(argument);
-        else if (streq(command, "sysinfo") || streq(command, "sprusr"))
+        else if (streq(command, "run"))       cmd_run_main(argument);
+        else if (streq(command, "sysinfo") || streq(command, "exofetch"))
             fail("EXNOSYS", "directive unimplemented");
         else {
             xk_print("EXBADCMD: unrecognized directive: ");
