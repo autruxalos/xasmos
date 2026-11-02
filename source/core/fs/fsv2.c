@@ -691,6 +691,11 @@ int64_t fs_read_at(const char *name, uint64_t off, void *buf, uint64_t cap) {
     return (int64_t)done;
 }
 
+/* Whole-file read: the first cap bytes. */
+int64_t fs_read(const char *name, void *buf, uint64_t cap) {
+    return fs_read_at(name, 0, buf, cap);
+}
+
 /* ---- public: state ------------------------------------------------------ */
 
 const FsFile *fs_lookup(const char *name) {
