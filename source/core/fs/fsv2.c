@@ -1,549 +1,348 @@
-/******************************************************************************
- * XASMOS - filesystem v2 implementation
- * Path: source/core/fs/fsv2.c
- ******************************************************************************/
+/* Host test for filesystem v2. A RAM disk counts and can fail any block write.
+ * fsck checks that the free map matches the reachable blocks exactly after
+ * each commit and each mount. The crash sweeps cut every write of a commit. */
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdint.h>
 #include "fsv2.h"
 
-#define MAGIC_LEN   8
-#define SB_BYTES    48                 /* checksummed header of a superblock */
-#define INODE_BYTES 256
-#define VERSION     2u
+#define SS      512u
+#define SECTORS (64u * 1024u * 1024u / SS)            /* 64 MiB = 16384 blocks */
+static uint8_t disk[SECTORS * SS];
+static int     writes_seen;
+static int     fail_write_at = -1;
 
-static const uint8_t MAGIC[MAGIC_LEN] = { 'X', 'A', 'S', 'M', 'F', 'S', '2', 0 };
-
-static struct {
-    BlkDev    *dev;
-    uint32_t   spb;                             /* sectors per block          */
-    uint64_t   total;                           /* blocks on the volume       */
-    uint64_t   gen;                             /* committed generation       */
-    uint64_t   itab_start;                      /* committed inode table area */
-    int        mounted;
-    int        broken;
-    int        dirty;                           /* something to commit        */
-    uint8_t    bitmap[FS_MAX_BLOCKS / 8];       /* 1 = block in use           */
-    uint32_t   group_free[FS_MAX_GROUPS];
-    uint64_t   hint;                            /* where the next search starts */
-    FsFile     files[FS_INODES];
-    FsExtent   defer[FS_DEFER_MAX];             /* freed after the next commit */
-    uint32_t   ndefer;
-    FsExtent   fresh[FS_MAX_EXT];               /* extents of the current write */
-    uint8_t    page[FS_BLOCK];
-    uint8_t    itab[FS_ITAB_BLOCKS * FS_BLOCK];
-} V;
-
-/* ---- little-endian fields ----------------------------------------------- */
-
-static void put32(uint8_t *p, uint32_t v) {
-    p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8);
-    p[2] = (uint8_t)(v >> 16); p[3] = (uint8_t)(v >> 24);
+static int d_read(void *c, uint64_t lba, uint32_t n, void *buf) {
+    (void)c;
+    if (lba + n > SECTORS) return BLK_E_RANGE;
+    memcpy(buf, disk + lba * SS, (size_t)n * SS);
+    return BLK_OK;
 }
-static void put64(uint8_t *p, uint64_t v) {
-    put32(p, (uint32_t)v);
-    put32(p + 4, (uint32_t)(v >> 32));
+static int d_write(void *c, uint64_t lba, uint32_t n, const void *buf) {
+    (void)c;
+    if (lba + n > SECTORS) return BLK_E_RANGE;
+    int k = writes_seen++;
+    if (k == fail_write_at) return BLK_E_IO;
+    memcpy(disk + lba * SS, buf, (size_t)n * SS);
+    return BLK_OK;
 }
-static uint32_t get32(const uint8_t *p) {
-    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
-}
-static uint64_t get64(const uint8_t *p) {
-    return (uint64_t)get32(p) | ((uint64_t)get32(p + 4) << 32);
+static int d_flush(void *c) { (void)c; return BLK_OK; }
+static const BlkOps d_ops = { d_read, d_write, d_flush };
+static BlkDev dev = { 0, &d_ops, SS, SECTORS };
+
+static int passes, fails;
+#define CHECK(c, ...) do { if (c) passes++; else { fails++; printf("FAIL  " __VA_ARGS__); printf("\n"); } } while (0)
+
+static uint8_t A[16u << 20], B[16u << 20];
+static uint8_t reach[FS_MAX_BLOCKS / 8];
+
+static void pattern(uint8_t *p, uint64_t n, uint32_t seed) {
+    for (uint64_t i = 0; i < n; i++) p[i] = (uint8_t)((i * 131u + seed * 17u + (i >> 12)) & 0xFF);
 }
 
-static uint64_t fnv64(const uint8_t *p, uint64_t n) {
-    uint64_t h = 14695981039346656037ULL;
-    for (uint64_t i = 0; i < n; i++) {
-        h ^= p[i];
-        h *= 1099511628211ULL;
-    }
-    return h;
+static void reach_mark(uint64_t b, int *dup) {
+    if (reach[b >> 3] & (1u << (b & 7))) *dup = 1;
+    reach[b >> 3] |= (uint8_t)(1u << (b & 7));
 }
 
-/* The inode table area used by a generation: even -> area 0, odd -> area 1. */
-static uint64_t itab_area(uint64_t gen) {
-    return (gen & 1) ? FS_ITAB_AREA1 : FS_ITAB_AREA0;
-}
-
-/* ---- bitmap and groups -------------------------------------------------- */
-
-static int bit_get(uint64_t b) {
-    return (V.bitmap[b >> 3] >> (b & 7)) & 1;
-}
-
-static void bit_set(uint64_t b) {
-    if (bit_get(b)) return;
-    V.bitmap[b >> 3] |= (uint8_t)(1u << (b & 7));
-    V.group_free[b / FS_GROUP_BLOCKS]--;
-}
-
-static void bit_clr(uint64_t b) {
-    if (!bit_get(b)) return;
-    V.bitmap[b >> 3] &= (uint8_t)~(1u << (b & 7));
-    V.group_free[b / FS_GROUP_BLOCKS]++;
-}
-
-/* Empty map, with the reserved blocks (superblocks and both table areas) taken. */
-static void bitmap_clear_all(void) {
-    for (uint64_t i = 0; i < (V.total + 7) / 8; i++) V.bitmap[i] = 0;
-    for (uint32_t g = 0; g * (uint64_t)FS_GROUP_BLOCKS < V.total; g++) {
-        uint64_t lo = (uint64_t)g * FS_GROUP_BLOCKS;
-        uint64_t hi = lo + FS_GROUP_BLOCKS;
-        if (hi > V.total) hi = V.total;
-        V.group_free[g] = (uint32_t)(hi - lo);
-    }
-    for (uint64_t b = 0; b < FS_DATA_START; b++) bit_set(b);
-}
-
-/* Marks a block taken while rebuilding from disk. A block claimed twice means
- * the disk is inconsistent, and the volume is refused. */
-static int mark_once(uint64_t b) {
-    if (b < FS_DATA_START || b >= V.total) return FS_ENOFS;
-    if (bit_get(b)) return FS_ENOFS;
-    bit_set(b);
-    return FS_OK;
-}
-
-/* Takes up to `need` blocks as one contiguous extent, from the hint onward.
- * Returns the length taken (0 if the volume is full). */
-static uint32_t take_extent(uint64_t need, FsExtent *out) {
-    uint64_t b = V.hint, scanned = 0;
-    while (scanned < V.total) {
-        if (b >= V.total) b = FS_DATA_START;
-        if (b % FS_GROUP_BLOCKS == 0 && V.group_free[b / FS_GROUP_BLOCKS] == 0) {
-            b += FS_GROUP_BLOCKS;
-            scanned += FS_GROUP_BLOCKS;
-            continue;
-        }
-        if (!bit_get(b)) break;
-        b++;
-        scanned++;
-    }
-    if (scanned >= V.total) return 0;
-
-    uint64_t len = 0;
-    while (len < need && b + len < V.total && !bit_get(b + len)) len++;
-    for (uint64_t i = 0; i < len; i++) bit_set(b + i);
-
-    out->start = b;
-    out->len = (uint32_t)len;
-    V.hint = b + len;
-    return (uint32_t)len;
-}
-
-static void release_fresh(uint32_t n) {
-    for (uint32_t i = 0; i < n; i++) {
-        for (uint32_t k = 0; k < V.fresh[i].len; k++) bit_clr(V.fresh[i].start + k);
-    }
-}
-
-static uint64_t free_blocks(void) {
-    uint64_t n = 0;
-    for (uint32_t g = 0; g * (uint64_t)FS_GROUP_BLOCKS < V.total; g++) n += V.group_free[g];
-    return n;
-}
-
-/* ---- block I/O ---------------------------------------------------------- */
-
-static int blk_put(uint64_t b, const uint8_t *buf) {
-    return blk_write(V.dev, b * V.spb, V.spb, buf) == BLK_OK ? FS_OK : FS_EIO;
-}
-
-static int blk_got(uint64_t b, uint8_t *buf) {
-    return blk_read(V.dev, b * V.spb, V.spb, buf) == BLK_OK ? FS_OK : FS_EIO;
-}
-
-static int geometry(BlkDev *d) {
-    uint32_t ss = blk_sector_size(d);
-    if (ss == 0 || FS_BLOCK % ss != 0) return FS_ENOFS;
-    V.dev = d;
-    V.spb = FS_BLOCK / ss;
-    V.total = (blk_sector_count(d) * ss) / FS_BLOCK;
-    if (V.total < FS_DATA_START + 16 || V.total > FS_MAX_BLOCKS) return FS_ENOFS;
-    return FS_OK;
-}
-
-/* ---- superblock --------------------------------------------------------- */
-
-static void sb_encode(uint64_t gen, uint64_t itab, uint32_t nitab) {
-    for (uint32_t i = 0; i < FS_BLOCK; i++) V.page[i] = 0;
-    for (uint32_t i = 0; i < MAGIC_LEN; i++) V.page[i] = MAGIC[i];
-    put32(V.page + 8, VERSION);
-    put64(V.page + 16, gen);
-    put64(V.page + 24, itab);
-    put32(V.page + 32, nitab);
-    put32(V.page + 36, FS_INODES);
-    put64(V.page + 40, V.total);
-    put64(V.page + 48, fnv64(V.page, SB_BYTES));       /* checksum of bytes 0..47 */
-}
-
-/* Reads one superblock copy. FS_OK only if magic, version, geometry, table
- * location and checksum all match. */
-static int sb_read(uint64_t slot, uint64_t *gen, uint64_t *itab, uint32_t *nitab) {
-    if (blk_got(slot, V.page) != FS_OK) return FS_EIO;
-    for (uint32_t i = 0; i < MAGIC_LEN; i++) {
-        if (V.page[i] != MAGIC[i]) return FS_ENOFS;
-    }
-    if (get32(V.page + 8) != VERSION) return FS_ENOFS;
-    if (get64(V.page + 40) != V.total) return FS_ENOFS;
-    if (get32(V.page + 36) != FS_INODES) return FS_ENOFS;
-    if (get64(V.page + 48) != fnv64(V.page, SB_BYTES)) return FS_ENOFS;
-    *gen = get64(V.page + 16);
-    *itab = get64(V.page + 24);
-    *nitab = get32(V.page + 32);
-    if (*nitab != FS_ITAB_BLOCKS) return FS_ENOFS;
-    if (*itab != FS_ITAB_AREA0 && *itab != FS_ITAB_AREA1) return FS_ENOFS;
-    if (itab_area(*gen) != *itab) return FS_ENOFS;
-    return FS_OK;
-}
-
-/* ---- inode table -------------------------------------------------------- */
-/* Record layout (256 bytes):
- *   0 used, 4 type, 8 size, 16 name[96], 112 first chain block,
- *   120 inline extents, 128 inline extent array (8 x 16 bytes)            */
-
-static void inode_encode(uint8_t *r, const FsFile *f) {
-    for (uint32_t i = 0; i < INODE_BYTES; i++) r[i] = 0;
-    put32(r + 0, f->used ? 1u : 0u);
-    put32(r + 4, f->type);
-    put64(r + 8, f->size);
-    for (uint32_t i = 0; i <= FS_NAME_MAX; i++) r[16 + i] = (uint8_t)f->name[i];
-    put64(r + 112, f->nchain ? f->chain[0] : 0);
-    uint32_t ninl = f->n < FS_INL ? f->n : FS_INL;
-    put32(r + 120, ninl);
-    for (uint32_t i = 0; i < ninl; i++) {
-        put64(r + 128 + i * 16, f->ext[i].start);
-        put32(r + 128 + i * 16 + 8, f->ext[i].len);
-    }
-}
-
-static int inode_decode(const uint8_t *r, FsFile *f) {
-    f->used = get32(r + 0) != 0;
-    f->type = get32(r + 4);
-    f->size = get64(r + 8);
-    for (uint32_t i = 0; i <= FS_NAME_MAX; i++) f->name[i] = (char)r[16 + i];
-    f->name[FS_NAME_MAX] = '\0';
-    f->dirty = 0;
-    f->nchain = 0;
-    f->n = 0;
-    if (!f->used) return FS_OK;
-
-    uint32_t ninl = get32(r + 120);
-    if (ninl > FS_INL) return FS_ENOFS;
-    for (uint32_t i = 0; i < ninl; i++) {
-        f->ext[f->n].start = get64(r + 128 + i * 16);
-        f->ext[f->n].len = get32(r + 128 + i * 16 + 8);
-        f->n++;
-    }
-    /* chain: each block holds a next pointer, a count, then the extents */
-    uint64_t blk = get64(r + 112);
-    while (blk != 0) {
-        if (f->nchain >= FS_MAX_CHAIN) return FS_ENOFS;
-        if (blk_got(blk, V.page) != FS_OK) return FS_EIO;
-        uint64_t next = get64(V.page);
-        uint32_t cnt = get32(V.page + 8);
-        if (cnt > FS_IND_EXT || f->n + cnt > FS_MAX_EXT) return FS_ENOFS;
-        for (uint32_t j = 0; j < cnt; j++) {
-            f->ext[f->n].start = get64(V.page + 16 + j * 16);
-            f->ext[f->n].len = get32(V.page + 16 + j * 16 + 8);
-            f->n++;
-        }
-        f->chain[f->nchain++] = blk;
-        blk = next;
-    }
-    return FS_OK;
-}
-
-/* ---- deferred release --------------------------------------------------- */
-
-static int defer_push(uint64_t start, uint32_t len) {
-    if (V.ndefer >= FS_DEFER_MAX) return FS_ENOMEM;
-    V.defer[V.ndefer].start = start;
-    V.defer[V.ndefer].len = len;
-    V.ndefer++;
-    return FS_OK;
-}
-
-/* Hands a file's blocks (extents and chain) to the deferred list. */
-static int defer_file(FsFile *f) {
-    uint32_t need = f->n + f->nchain;
-    if (V.ndefer + need > FS_DEFER_MAX) return FS_ENOMEM;
-    for (uint32_t i = 0; i < f->n; i++) defer_push(f->ext[i].start, f->ext[i].len);
-    for (uint32_t i = 0; i < f->nchain; i++) defer_push(f->chain[i], 1);
-    f->n = 0;
-    f->nchain = 0;
-    return FS_OK;
-}
-
-static void release_deferred(void) {
-    for (uint32_t i = 0; i < V.ndefer; i++) {
-        for (uint32_t k = 0; k < V.defer[i].len; k++) bit_clr(V.defer[i].start + k);
-    }
-    V.ndefer = 0;
-}
-
-/* ---- lookup ------------------------------------------------------------- */
-
-static FsFile *find(const char *name) {
+/* fsck: free map == reachable blocks, exactly. No leak, no double use. */
+static int fsck(void) {
+    uint64_t total = fs_total_blocks();
+    memset(reach, 0, sizeof reach);
+    int dup = 0;
+    for (uint64_t b = 0; b < FS_DATA_START; b++) reach_mark(b, &dup);   /* superblocks + both table areas */
+    uint64_t used = FS_DATA_START;
     for (uint32_t i = 0; i < FS_INODES; i++) {
-        if (!V.files[i].used) continue;
-        const char *a = V.files[i].name, *b = name;
-        while (*a != '\0' && *a == *b) { a++; b++; }
-        if (*a == *b) return &V.files[i];
-    }
-    return 0;
-}
-
-static int name_ok(const char *name) {
-    uint32_t n = 0;
-    while (name[n] != '\0') n++;
-    return n > 0 && n <= FS_NAME_MAX;
-}
-
-/* ---- public: volume life cycle ------------------------------------------ */
-
-int fs_commit(void);
-
-int fs_format(BlkDev *d) {
-    if (!d || geometry(d) != FS_OK) return FS_ENOFS;
-    bitmap_clear_all();
-    for (uint32_t i = 0; i < FS_INODES; i++) V.files[i].used = 0;
-    V.ndefer = 0;
-    V.gen = 0;
-    V.itab_start = 0;
-    V.hint = FS_DATA_START;
-    V.broken = 0;
-    V.mounted = 1;
-    V.dirty = 1;
-    return fs_commit();
-}
-
-int fs_mount(BlkDev *d) {
-    V.mounted = 0;
-    if (!d || geometry(d) != FS_OK) return FS_ENOFS;
-
-    uint64_t g0 = 0, g1 = 0, i0 = 0, i1 = 0;
-    uint32_t n0 = 0, n1 = 0;
-    int ok0 = sb_read(0, &g0, &i0, &n0) == FS_OK;
-    int ok1 = sb_read(1, &g1, &i1, &n1) == FS_OK;
-    if (!ok0 && !ok1) return FS_ENOFS;
-
-    uint64_t gen = ok0 ? g0 : g1;
-    uint64_t itab = ok0 ? i0 : i1;
-    if (ok0 && ok1 && g1 > g0) { gen = g1; itab = i1; }
-
-    for (uint32_t b = 0; b < FS_ITAB_BLOCKS; b++) {
-        if (blk_got(itab + b, V.itab + b * FS_BLOCK) != FS_OK) return FS_EIO;
-    }
-
-    bitmap_clear_all();
-    V.hint = FS_DATA_START;
-    for (uint32_t i = 0; i < FS_INODES; i++) {
-        if (inode_decode(V.itab + i * INODE_BYTES, &V.files[i]) != FS_OK) return FS_ENOFS;
-        FsFile *f = &V.files[i];
+        const FsFile *f = fs_file(i);
         if (!f->used) continue;
-        for (uint32_t k = 0; k < f->nchain; k++) {
-            if (mark_once(f->chain[k]) != FS_OK) return FS_ENOFS;
-        }
-        for (uint32_t k = 0; k < f->n; k++) {
-            if (f->ext[k].len == 0) return FS_ENOFS;
-            for (uint32_t j = 0; j < f->ext[k].len; j++) {
-                if (mark_once(f->ext[k].start + j) != FS_OK) return FS_ENOFS;
-            }
+        for (uint32_t k = 0; k < f->nchain; k++) { reach_mark(f->chain[k], &dup); used++; }
+        for (uint32_t e = 0; e < f->n; e++) {
+            for (uint32_t k = 0; k < f->ext[e].len; k++) { reach_mark(f->ext[e].start + k, &dup); used++; }
         }
     }
-
-    V.gen = gen;
-    V.itab_start = itab;
-    V.ndefer = 0;
-    V.broken = 0;
-    V.dirty = 0;
-    V.mounted = 1;
-    return FS_OK;
+    if (dup) return 0;
+    const uint8_t *bm = fs_bitmap();
+    for (uint64_t b = 0; b < total; b++) {
+        int in_map = (bm[b >> 3] >> (b & 7)) & 1;
+        int reachable = (reach[b >> 3] >> (b & 7)) & 1;
+        if (in_map != reachable) return 0;
+    }
+    return fs_free_blocks() == total - used;
 }
 
-/* Commit order: chains, inode table area, superblock (the commit point),
- * then release. A failure before the superblock leaves the previous
- * generation as the truth; a failure after it cannot be rolled back, so the
- * volume is marked broken and must be remounted. */
-int fs_commit(void) {
-    if (!V.mounted) return FS_ENOFS;
-    if (V.broken) return FS_EBROKEN;
-    if (!V.dirty) return FS_OK;
+static void fresh(void) {
+    memset(disk, 0, sizeof disk);
+    writes_seen = 0;
+    fail_write_at = -1;
+}
 
-    /* 0. everything that can refuse is checked before anything changes */
-    uint64_t need = 0;
-    for (uint32_t i = 0; i < FS_INODES; i++) {
-        const FsFile *f = &V.files[i];
-        if (!f->used || !f->dirty || f->n <= FS_INL) continue;
-        uint32_t nind = (f->n - FS_INL + FS_IND_EXT - 1) / FS_IND_EXT;
-        if (nind > FS_MAX_CHAIN) return FS_ENOMEM;
-        need += nind;
+static int read_eq(const char *name, const uint8_t *want, uint64_t n) {
+    static uint8_t got[16u << 20];
+    int64_t r = fs_read(name, got, n);
+    return r == (int64_t)n && memcmp(got, want, (size_t)n) == 0;
+}
+
+/* Leaves 90 free blocks as 30 holes of 3 blocks each, and nothing else free
+ * before them. Each hole is separated by a file that stays in use. */
+static void fragment_volume(void) {
+    char name[32];
+    for (int i = 0; i < 60; i++) {
+        snprintf(name, sizeof name, "|bin|f%d", i);
+        fs_create(name);
+        fs_write(name, A, 3 * 4096);
     }
-    if (need > free_blocks()) return FS_ENOSPC;
+    fs_commit();
+    for (int i = 1; i < 60; i += 2) {
+        snprintf(name, sizeof name, "|bin|f%d", i);
+        fs_delete(name);
+    }
+    fs_commit();
+    const uint64_t holes = 30 * 3;
+    for (int n = 0; fs_free_blocks() > holes; n++) {
+        uint64_t want = fs_free_blocks() - holes;
+        if (want > 2048) want = 2048;
+        snprintf(name, sizeof name, "|boot|fill%d", n);
+        fs_create(name);
+        fs_write(name, A, want * 4096);
+    }
+    fs_commit();
+}
 
-    /* 1. chains for files whose extent list changed */
-    for (uint32_t i = 0; i < FS_INODES; i++) {
-        FsFile *f = &V.files[i];
-        if (!f->used || !f->dirty) continue;
+int main(void) {
+    /* 1. blank disk: not a volume; format makes one */
+    fresh();
+    CHECK(fs_mount(&dev) == FS_ENOFS, "blank disk: mount refuses");
+    CHECK(fs_format(&dev) == FS_OK, "format");
+    CHECK(fs_generation() == 1, "format commits generation 1");
+    CHECK(fsck(), "fsck after format");
 
-        uint32_t nind = f->n > FS_INL ? (f->n - FS_INL + FS_IND_EXT - 1) / FS_IND_EXT : 0;
-        for (uint32_t k = 0; k < nind; k++) {
-            FsExtent e;
-            if (take_extent(1, &e) != 1) { V.broken = 1; return FS_ENOSPC; }
-            f->chain[k] = e.start;
+    /* 2. a 100 KiB file survives a remount, byte for byte */
+    pattern(A, 100 * 1024, 1);
+    CHECK(fs_create("|user|a") == FS_OK, "create |user|a");
+    CHECK(fs_write("|user|a", A, 100 * 1024) == FS_OK, "write 100 KiB");
+    CHECK(fs_commit() == FS_OK, "commit");
+    CHECK(fsck(), "fsck after commit");
+    CHECK(fs_mount(&dev) == FS_OK, "remount");
+    CHECK(read_eq("|user|a", A, 100 * 1024), "100 KiB file reads back intact");
+    CHECK(fsck(), "fsck after remount");
+
+    /* 3. a 16 MiB file, contiguous */
+    pattern(B, 16u << 20, 2);
+    CHECK(fs_create("|boot|big") == FS_OK, "create |boot|big");
+    CHECK(fs_write("|boot|big", B, 16u << 20) == FS_OK, "write 16 MiB");
+    CHECK(fs_commit() == FS_OK, "commit 16 MiB");
+    CHECK(fs_mount(&dev) == FS_OK, "remount after 16 MiB");
+    CHECK(read_eq("|boot|big", B, 16u << 20), "16 MiB file reads back intact");
+    CHECK(fsck(), "fsck with a large file");
+
+    /* 4. fragmentation: a 40-block file must span holes, and so chain */
+    fragment_volume();
+    CHECK(fsck(), "fsck on the fragmented volume");
+    pattern(B, 40 * 4096, 99);
+    CHECK(fs_create("|bin|prog") == FS_OK, "create |bin|prog");
+    CHECK(fs_write("|bin|prog", B, 40 * 4096) == FS_OK, "write 40 blocks into the holes");
+    const FsFile *prog = fs_lookup("|bin|prog");
+    CHECK(prog && prog->n > FS_INL, "the file needs more extents than fit in the inode");
+    CHECK(fs_commit() == FS_OK, "commit fragmented file");
+    CHECK(prog && prog->nchain >= 1, "the extent chain was written");
+    CHECK(fsck(), "fsck with a chained file");
+    CHECK(fs_mount(&dev) == FS_OK, "remount chained file");
+    CHECK(read_eq("|bin|prog", B, 40 * 4096), "chained file reads back intact");
+    CHECK(fsck(), "fsck after remount with chains");
+
+    /* 5. superblock fallback: a torn newest superblock uses the previous one.
+     * The checksum covers bytes 0..47, so the tear goes inside that range. */
+    uint64_t gen_before = fs_generation();
+    pattern(A, 4096, 77);
+    CHECK(fs_create("|root|note") == FS_OK, "create |root|note");
+    CHECK(fs_write("|root|note", A, 4096) == FS_OK, "write note");
+    CHECK(fs_commit() == FS_OK, "commit note");
+    uint64_t newest_slot = fs_generation() & 1;
+    disk[newest_slot * FS_BLOCK + 20] ^= 0x5A;
+    CHECK(fs_mount(&dev) == FS_OK, "mount with a torn newest superblock");
+    CHECK(fs_generation() == gen_before, "the previous generation is used");
+    CHECK(fs_lookup("|root|note") == NULL, "the uncommitted change is not visible");
+    CHECK(fsck(), "fsck after superblock fallback");
+
+    /* 6. crash sweep on a fragmented file: cut every write of its commit */
+    fresh();
+    CHECK(fs_format(&dev) == FS_OK, "format for the crash sweep");
+    fragment_volume();
+    pattern(A, 40 * 4096, 3);
+    CHECK(fs_create("|user|r") == FS_OK, "create |user|r");
+    CHECK(fs_write("|user|r", A, 40 * 4096) == FS_OK, "write old content");
+    CHECK(fs_commit() == FS_OK, "commit old content");
+    static uint8_t back[sizeof disk];
+    memcpy(back, disk, sizeof disk);
+
+    pattern(B, 40 * 4096, 4);
+    CHECK(fs_write("|user|r", B, 40 * 4096) == FS_OK, "write new content");
+    writes_seen = 0;
+    CHECK(fs_commit() == FS_OK, "reference commit");
+    int W = writes_seen;
+    CHECK(W >= (int)FS_ITAB_BLOCKS + 2, "a fragmented commit writes its chain, table and superblock");
+    CHECK(fs_mount(&dev) == FS_OK, "mount the new state");
+    CHECK(read_eq("|user|r", B, 40 * 4096), "reference: the new content is committed");
+
+    int sweep_ok = 1;
+    for (int k = 0; k <= W; k++) {
+        memcpy(disk, back, sizeof disk);
+        if (fs_mount(&dev) != FS_OK) { sweep_ok = 0; break; }
+        if (fs_write("|user|r", B, 40 * 4096) != FS_OK) { sweep_ok = 0; break; }
+        writes_seen = 0;
+        fail_write_at = k;
+        int rc = fs_commit();
+        fail_write_at = -1;
+        if (k < W && rc == FS_OK) sweep_ok = 0;
+        if (k == W && rc != FS_OK) sweep_ok = 0;
+
+        if (fs_mount(&dev) != FS_OK) { sweep_ok = 0; break; }
+        int is_old = read_eq("|user|r", A, 40 * 4096);
+        int is_new = read_eq("|user|r", B, 40 * 4096);
+        if (k < W && !is_old) sweep_ok = 0;
+        if (k == W && !is_new) sweep_ok = 0;
+        if (!is_old && !is_new) sweep_ok = 0;
+        if (!fsck()) sweep_ok = 0;
+    }
+    CHECK(sweep_ok, "every cut point leaves the old or the new content, never a mix, and fsck passes");
+
+    /* 7. delete releases blocks after the commit, not before */
+    fresh();
+    CHECK(fs_format(&dev) == FS_OK, "format for delete");
+    pattern(A, 8 * 4096, 5);
+    CHECK(fs_create("|user|d") == FS_OK, "create |user|d");
+    CHECK(fs_write("|user|d", A, 8 * 4096) == FS_OK, "write 8 blocks");
+    CHECK(fs_commit() == FS_OK, "commit");
+    uint64_t free_before = fs_free_blocks();
+    CHECK(fs_delete("|user|d") == FS_OK, "delete");
+    CHECK(fs_free_blocks() == free_before, "blocks stay in use until the commit");
+    CHECK(fs_commit() == FS_OK, "commit the delete");
+    CHECK(fs_free_blocks() == free_before + 8, "exactly the 8 data blocks are free after the commit");
+    CHECK(fsck(), "fsck after delete");
+
+    /* 8. names: refused when too long or duplicated */
+    char longname[FS_NAME_MAX + 2];
+    memset(longname, 'x', sizeof longname - 1);
+    longname[sizeof longname - 1] = '\0';
+    CHECK(fs_create(longname) == FS_EINVAL, "a name over the limit is refused");
+    CHECK(fs_create("|user|d") == FS_OK, "re-create after delete");
+    CHECK(fs_create("|user|d") == FS_EEXIST, "a duplicate name is refused");
+
+    /* 9. byte-range I/O against a model: random writes and reads, commits and
+     * remounts in between. The model is a plain RAM copy of the file. */
+    static uint8_t model[2u << 20];
+    uint64_t model_size = 0;
+    uint32_t rs = 12345;
+#define RNG() (rs ^= rs << 13, rs ^= rs >> 17, rs ^= rs << 5, rs)
+    fresh();
+    CHECK(fs_format(&dev) == FS_OK, "format for the byte-range model");
+    CHECK(fs_create("|user|m") == FS_OK, "create |user|m");
+    int model_ok = 1;
+    for (int op = 0; op < 400 && model_ok; op++) {
+        if (RNG() % 4 != 0) {
+            uint64_t off = RNG() % (model_size + 8192);
+            uint64_t len = 1 + RNG() % 20000;
+            if (off + len > sizeof model) len = sizeof model - off;
+            for (uint64_t i = 0; i < len; i++) A[i] = (uint8_t)RNG();
+            if (fs_write_at("|user|m", off, A, len) != FS_OK) model_ok = 0;
+            memcpy(model + off, A, (size_t)len);
+            if (off + len > model_size) model_size = off + len;
+        } else {
+            uint64_t off = RNG() % (model_size + 4096);
+            uint64_t cap = 1 + RNG() % 30000;
+            int64_t n = fs_read_at("|user|m", off, B, cap);
+            uint64_t want = off >= model_size ? 0 : (model_size - off < cap ? model_size - off : cap);
+            if (n != (int64_t)want) model_ok = 0;
+            else if (n > 0 && memcmp(B, model + off, (size_t)n) != 0) model_ok = 0;
         }
-        f->nchain = nind;
-
-        for (uint32_t k = 0; k < nind; k++) {
-            uint32_t first = FS_INL + k * FS_IND_EXT;
-            uint32_t cnt = f->n - first;
-            if (cnt > FS_IND_EXT) cnt = FS_IND_EXT;
-            for (uint32_t j = 0; j < FS_BLOCK; j++) V.page[j] = 0;
-            put64(V.page, k + 1 < nind ? f->chain[k + 1] : 0);
-            put32(V.page + 8, cnt);
-            for (uint32_t j = 0; j < cnt; j++) {
-                put64(V.page + 16 + j * 16, f->ext[first + j].start);
-                put32(V.page + 16 + j * 16 + 8, f->ext[first + j].len);
-            }
-            if (blk_put(f->chain[k], V.page) != FS_OK) { V.broken = 1; return FS_EIO; }
+        if (op % 50 == 49) {
+            if (fs_commit() != FS_OK || !fsck()) model_ok = 0;
+            if (fs_mount(&dev) != FS_OK) model_ok = 0;
         }
     }
+    CHECK(model_ok, "400 random byte-range operations agree with the model");
+    CHECK(fs_commit() == FS_OK && fsck(), "commit and fsck after the model run");
+    CHECK(fs_mount(&dev) == FS_OK, "remount after the model run");
+    const FsFile *mf = fs_lookup("|user|m");
+    CHECK(mf && mf->size == model_size, "file size matches the model after remount");
+    CHECK(model_size > 0 && fs_read_at("|user|m", 0, B, model_size) == (int64_t)model_size &&
+          memcmp(B, model, (size_t)model_size) == 0, "whole file matches the model after remount");
 
-    /* 2. the inode table, into the area this generation uses */
-    uint64_t gen = V.gen + 1;
-    uint64_t area = itab_area(gen);
-    for (uint32_t i = 0; i < FS_INODES; i++) {
-        inode_encode(V.itab + i * INODE_BYTES, &V.files[i]);
+    /* 10. streaming: a 16 MiB file written and read in 4 KiB and 64 KiB pieces,
+     * never holding more than one piece in memory */
+#define GEN(i) ((uint8_t)(((i) * 131u + ((i) >> 12) * 7u + 3u) & 0xFF))
+    fresh();
+    CHECK(fs_format(&dev) == FS_OK, "format for streaming");
+    CHECK(fs_create("|boot|stream") == FS_OK, "create |boot|stream");
+    int stream_ok = 1;
+    for (uint64_t off = 0; off < (16u << 20); off += 4096) {
+        for (uint64_t j = 0; j < 4096; j++) A[j] = GEN(off + j);
+        if (fs_write_at("|boot|stream", off, A, 4096) != FS_OK) stream_ok = 0;
     }
-    for (uint32_t b = 0; b < FS_ITAB_BLOCKS; b++) {
-        if (blk_put(area + b, V.itab + b * FS_BLOCK) != FS_OK) { V.broken = 1; return FS_EIO; }
+    CHECK(stream_ok, "write 16 MiB in 4 KiB pieces");
+    CHECK(fs_commit() == FS_OK && fsck(), "commit the streamed file");
+    CHECK(fs_mount(&dev) == FS_OK, "remount the streamed file");
+    const FsFile *sf = fs_lookup("|boot|stream");
+    CHECK(sf && sf->size == (16u << 20) && sf->n == 1, "16 MiB stored as one contiguous extent");
+    stream_ok = 1;
+    for (uint64_t off = 0; off < (16u << 20); off += 65536) {
+        if (fs_read_at("|boot|stream", off, B, 65536) != 65536) { stream_ok = 0; break; }
+        for (uint64_t j = 0; j < 65536; j++) if (B[j] != GEN(off + j)) stream_ok = 0;
     }
+    CHECK(stream_ok, "read 16 MiB back in 64 KiB pieces, byte for byte");
 
-    /* 3. the commit point: superblock of the new generation */
-    sb_encode(gen, area, FS_ITAB_BLOCKS);
-    if (blk_put(gen & 1, V.page) != FS_OK) { V.broken = 1; return FS_EIO; }
+    /* 11. a write that cannot fit changes nothing */
+    CHECK(fs_write_at("|boot|stream", 1ull << 30, A, 1) == FS_ENOSPC,
+          "a write 1 GiB past the end on a 64 MiB disk is refused");
+    CHECK(fs_lookup("|boot|stream")->size == (16u << 20), "the size is unchanged after the refusal");
+    CHECK(fs_commit() == FS_OK && fsck(), "nothing to commit, fsck still exact");
 
-    /* 4. the new state is durable: release what it no longer uses */
-    V.gen = gen;
-    V.itab_start = area;
-    release_deferred();
-    for (uint32_t i = 0; i < FS_INODES; i++) V.files[i].dirty = 0;
-    V.dirty = 0;
-    return FS_OK;
-}
+    /* 12. crash sweep for a partial rewrite in the middle of a fragmented file */
+    fresh();
+    CHECK(fs_format(&dev) == FS_OK, "format for the partial-write sweep");
+    fragment_volume();
+    pattern(A, 40 * 4096, 3);
+    CHECK(fs_create("|user|r") == FS_OK, "create |user|r");
+    CHECK(fs_write("|user|r", A, 40 * 4096) == FS_OK, "write old content");
+    CHECK(fs_commit() == FS_OK, "commit old content");
+    static uint8_t back2[sizeof disk];
+    memcpy(back2, disk, sizeof disk);
 
-/* ---- public: files ------------------------------------------------------ */
+    static uint8_t patch[100000];
+    pattern(patch, sizeof patch, 8);
+    memcpy(B, A, 40 * 4096);
+    memcpy(B + 5000, patch, sizeof patch);           /* the expected new content */
 
-int fs_create(const char *name) {
-    if (!V.mounted) return FS_ENOFS;
-    if (V.broken) return FS_EBROKEN;
-    if (!name_ok(name)) return FS_EINVAL;
-    if (find(name)) return FS_EEXIST;
-    for (uint32_t i = 0; i < FS_INODES; i++) {
-        FsFile *f = &V.files[i];
-        if (f->used) continue;
-        f->used = 1;
-        f->type = 0;
-        f->size = 0;
-        f->n = 0;
-        f->nchain = 0;
-        f->dirty = 1;
-        uint32_t k = 0;
-        while (name[k] != '\0') { f->name[k] = name[k]; k++; }
-        f->name[k] = '\0';
-        V.dirty = 1;
-        return FS_OK;
+    memcpy(disk, back2, sizeof disk);
+    CHECK(fs_mount(&dev) == FS_OK, "sweep: mount the old state");
+    CHECK(fs_write_at("|user|r", 5000, patch, sizeof patch) == FS_OK, "sweep: partial rewrite");
+    writes_seen = 0;
+    CHECK(fs_commit() == FS_OK, "sweep: reference commit");
+    int W2 = writes_seen;
+    CHECK(fs_mount(&dev) == FS_OK && read_eq("|user|r", B, 40 * 4096), "sweep: reference content is the patched file");
+
+    int psweep = 1;
+    for (int k = 0; k <= W2; k++) {
+        memcpy(disk, back2, sizeof disk);
+        if (fs_mount(&dev) != FS_OK) { psweep = 0; break; }
+        if (fs_write_at("|user|r", 5000, patch, sizeof patch) != FS_OK) { psweep = 0; break; }
+        writes_seen = 0;
+        fail_write_at = k;
+        int rc = fs_commit();
+        fail_write_at = -1;
+        if (k < W2 && rc == FS_OK) psweep = 0;
+        if (k == W2 && rc != FS_OK) psweep = 0;
+        if (fs_mount(&dev) != FS_OK) { psweep = 0; break; }
+        int is_old = read_eq("|user|r", A, 40 * 4096);
+        int is_new = read_eq("|user|r", B, 40 * 4096);
+        if (k < W2 && !is_old) psweep = 0;
+        if (k == W2 && !is_new) psweep = 0;
+        if (!is_old && !is_new) psweep = 0;
+        if (!fsck()) psweep = 0;
     }
-    return FS_ENOSPC;
+    CHECK(psweep, "every cut of a partial rewrite leaves the old or the new content, and fsck passes");
+
+    printf("fs v2: %d passed, %d failed\n", passes, fails);
+    return fails != 0;
 }
-
-int fs_delete(const char *name) {
-    if (!V.mounted) return FS_ENOFS;
-    if (V.broken) return FS_EBROKEN;
-    FsFile *f = find(name);
-    if (!f) return FS_ENOENT;
-    int rc = defer_file(f);
-    if (rc != FS_OK) return rc;
-    f->used = 0;
-    f->dirty = 1;
-    V.dirty = 1;
-    return FS_OK;
-}
-
-/* Replaces the whole content. The new blocks are written before anything
- * refers to them; the old ones are released only after the next commit. */
-int fs_write(const char *name, const void *buf, uint64_t len) {
-    if (!V.mounted) return FS_ENOFS;
-    if (V.broken) return FS_EBROKEN;
-    FsFile *f = find(name);
-    if (!f) return FS_ENOENT;
-
-    uint64_t need = (len + FS_BLOCK - 1) / FS_BLOCK;
-    uint32_t nf = 0;
-    uint64_t got = 0;
-    while (got < need) {
-        if (nf == FS_MAX_EXT) { release_fresh(nf); return FS_ENOMEM; }
-        FsExtent e;
-        uint32_t l = take_extent(need - got, &e);
-        if (l == 0) { release_fresh(nf); return FS_ENOSPC; }
-        V.fresh[nf++] = e;
-        got += l;
-    }
-    if (V.ndefer + f->n + f->nchain > FS_DEFER_MAX) { release_fresh(nf); return FS_ENOMEM; }
-
-    const uint8_t *src = (const uint8_t *)buf;
-    uint64_t left = len;
-    for (uint32_t i = 0; i < nf; i++) {
-        for (uint32_t k = 0; k < V.fresh[i].len; k++) {
-            uint64_t n = left < FS_BLOCK ? left : FS_BLOCK;
-            for (uint64_t j = 0; j < FS_BLOCK; j++) V.page[j] = j < n ? src[j] : 0;
-            if (blk_put(V.fresh[i].start + k, V.page) != FS_OK) {
-                release_fresh(nf);
-                return FS_EIO;
-            }
-            src += n;
-            left -= n;
-        }
-    }
-
-    defer_file(f);
-    for (uint32_t i = 0; i < nf; i++) f->ext[i] = V.fresh[i];
-    f->n = nf;
-    f->size = len;
-    f->dirty = 1;
-    V.dirty = 1;
-    return FS_OK;
-}
-
-int64_t fs_read(const char *name, void *buf, uint64_t cap) {
-    if (!V.mounted) return FS_ENOFS;
-    FsFile *f = find(name);
-    if (!f) return FS_ENOENT;
-
-    uint64_t want = f->size < cap ? f->size : cap;
-    uint8_t *dst = (uint8_t *)buf;
-    uint64_t off = 0;
-    for (uint32_t i = 0; i < f->n && off < want; i++) {
-        for (uint32_t k = 0; k < f->ext[i].len && off < want; k++) {
-            if (blk_got(f->ext[i].start + k, V.page) != FS_OK) return FS_EIO;
-            uint64_t n = want - off < FS_BLOCK ? want - off : FS_BLOCK;
-            for (uint64_t j = 0; j < n; j++) dst[off + j] = V.page[j];
-            off += n;
-        }
-    }
-    return (int64_t)off;
-}
-
-/* ---- public: state ------------------------------------------------------ */
-
-const FsFile *fs_lookup(const char *name) {
-    return find(name);
-}
-
-const FsFile *fs_file(uint32_t i) {
-    return i < FS_INODES ? &V.files[i] : 0;
-}
-
-uint64_t fs_total_blocks(void) { return V.total; }
-uint64_t fs_free_blocks(void)  { return free_blocks(); }
-uint64_t fs_generation(void)   { return V.gen; }
-uint64_t fs_itab_start(void)   { return V.itab_start; }
-const uint8_t *fs_bitmap(void) { return V.bitmap; }
