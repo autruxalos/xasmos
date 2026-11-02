@@ -16,7 +16,8 @@
 /* Brings up the controller behind `d` (class 01/08). On BLK_OK, `out` is ready
  * for blk_read/blk_write. Returns BLK_OK, BLK_E_ARG, BLK_E_IO or BLK_E_TIMEOUT. */
 int nvme_init(const PciDev *d, BlkDev *out);
-
+/* Serial number of the controller, trailing blanks removed. Needs nvme_init. */
+int nvme_controller_serial(char *out, uint32_t max);
 /* Pure decoding helpers (no hardware), used by the host tests. */
 
 /* log2 of the sector size selected by FLBAS in an Identify Namespace page,
