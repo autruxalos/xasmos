@@ -356,3 +356,29 @@ int nvme_init(const PciDev *d, BlkDev *out) {
     out->sector_count = g_nvme.sector_count;
     return BLK_OK;
 }
+
+/* Serial number of the controller (Identify Controller, bytes 4..23), with
+ * trailing blanks removed. `out` must hold at least 21 bytes. */
+int nvme_controller_serial(char *out, uint32_t max) {
+    if (!out || max < 21u) return BLK_E_ARG;
+    if (g_nvme.dma == 0) return BLK_E_IO;
+
+    uint8_t cmd[SQE_BYTES];
+    for (uint32_t i = 0; i < SQE_BYTES; i++) cmd[i] = 0;
+    cmd[0] = ADM_IDENTIFY;
+    put32(cmd, 10, 1u);                                /* CNS 1: controller */
+    put64(cmd, 6, g_nvme.dma_phys);
+
+    uint32_t dw3;
+    if (admin_exec(cmd, &dw3) != BLK_OK) return BLK_E_TIMEOUT;
+    if (nvme_cqe_status(dw3) != 0) return BLK_E_IO;
+
+    static uint8_t ctl[BOUNCE_BYTES];   /* static: see identify_namespace */
+    copy_out(ctl, g_nvme.dma, BOUNCE_BYTES);
+
+    uint32_t n = 0;
+    for (uint32_t i = 0; i < 20u; i++) out[n++] = (char)ctl[4 + i];
+    while (n > 0 && out[n - 1] == ' ') n--;
+    out[n] = '\0';
+    return BLK_OK;
+}
