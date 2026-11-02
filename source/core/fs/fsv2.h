@@ -80,6 +80,11 @@ int            fs_create(const char *name);
 int            fs_delete(const char *name);
 int            fs_write(const char *name, const void *buf, uint64_t len);
 int64_t        fs_read(const char *name, void *buf, uint64_t cap);
+/* Byte-range I/O. Any size, any offset; the caller never needs a buffer as
+ * large as the file. Writing past the end leaves zeros in the gap. A failed
+ * call changes nothing. */
+int            fs_write_at(const char *name, uint64_t off, const void *buf, uint64_t len);
+int64_t        fs_read_at(const char *name, uint64_t off, void *buf, uint64_t cap);
 const FsFile  *fs_lookup(const char *name);
 const FsFile  *fs_file(uint32_t i);       /* i < FS_INODES                  */
 
