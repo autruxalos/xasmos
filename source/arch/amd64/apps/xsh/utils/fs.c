@@ -1,4 +1,4 @@
-}/******************************************************************************
+/******************************************************************************
  * XASMOS - Coreutil: fs. The persistent EXFS volume on the system disk.
  *   fs mount      read the committed state from the disk (read-only)
  *   fs install    copy the embedded programs into |bin (RAM; then fs sync)
