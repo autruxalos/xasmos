@@ -2,12 +2,13 @@
  * XASMOS - EXFS file content on token frames
  * Path: source/arch/amd64/drivers/storage/exfs/data.c
  *
- * A file owns one 4 KiB frame, sealed by the token ledger, only after its
- * first write. An empty file costs no memory. Overwrites reuse the frame.
+ * A file owns one 4 KiB frame, sealed by the token ledger, from its first
+ * write on. An empty file costs no memory. A write marks the file dirty; the
+ * content reaches the disk at the next sync (store.c).
  *
- * KNOWN LIMIT: the frame's physical address is dereferenced directly. That
- * is valid while the kernel identity map is active (it is, in xeret). A
- * process must never reach these bytes directly: it uses its own mapping.
+ * KNOWN LIMIT: the frame's physical address is dereferenced directly, which
+ * is valid while the kernel identity map is active. Processes never reach
+ * these bytes: they use their own mapping.
  ******************************************************************************/
 #include "exfs_internal.h"
 
@@ -18,19 +19,12 @@ int exfs_data_release(EXFSNode *n) {
     return 0;
 }
 
-/* Replaces the file's whole content with text (up to EXFS_DATA_MAX-1 bytes).
- * Returns 0 on success; EXFS_ERR_TRUNC if the text was cut to fit (the part
- * that fits IS stored); EXFS_ERR_NOTFILE, EXFS_ERR_NOMEM or EXFS_ERR_DENIED
- * on failure, in which case the file's previous content is untouched. */
-int exfs_write_data(const char *path, const char *text) {
-    exfs_init();
-    EXFSNode *n = exfs_find(path);
-    if (!n || n->type != TYPE_FILE) return EXFS_ERR_NOTFILE;
-
+/* Stores len bytes as the file's whole content. The file must be a regular
+ * file; the frame is allocated on the first write. */
+static int store_bytes(EXFSNode *n, const uint8_t *src, int len) {
     if (n->data_tok == XTOKEN_INVALID) {
         n->data_tok = xtok_alloc_ram(XTOK_OWNER_KERNEL, 1, XTOK_RIGHTS_RAM_DEFAULT);
         if (n->data_tok == XTOKEN_INVALID) return EXFS_ERR_NOMEM;
-        n->data_len = 0;
     }
 
     UINT64 phys = 0;
@@ -39,21 +33,40 @@ int exfs_write_data(const char *path, const char *text) {
         return EXFS_ERR_DENIED;
     }
 
-    char *page = (char *)(UINTN)phys;
-    int i = 0;
-    while (text[i] != '\0' && i < EXFS_DATA_MAX - 1) {
-        page[i] = text[i];
-        i++;
-    }
-    page[i] = '\0';
-    n->data_len = i;
-    return (text[i] != '\0') ? EXFS_ERR_TRUNC : 0;
+    uint8_t *page = (uint8_t *)(UINTN)phys;
+    for (int i = 0; i < len; i++) page[i] = src[i];
+    n->data_len   = len;
+    n->data_dirty = 1;
+    exfs_table_dirty = 1;
+    return 0;
 }
 
-/* Copies up to max-1 bytes into out and always NUL-terminates it.
- * Returns the number of bytes copied (0 for a never-written file), or
- * EXFS_ERR_NOTFILE / EXFS_ERR_DENIED. Reads are bounded by data_len, so
- * stale bytes left in a recycled frame past that length are never exposed. */
+/* Text content: stops at the first NUL or at EXFS_DATA_MAX-1 bytes. */
+int exfs_write_data(const char *path, const char *text) {
+    exfs_init();
+    EXFSNode *n = exfs_find(path);
+    if (!n || n->type != TYPE_FILE) return EXFS_ERR_NOTFILE;
+
+    int len = 0;
+    while (text[len] != '\0' && len < EXFS_DATA_MAX - 1) len++;
+    int truncated = (text[len] != '\0');
+
+    int rc = store_bytes(n, (const uint8_t *)text, len);
+    if (rc != 0) return rc;
+    return truncated ? EXFS_ERR_TRUNC : 0;
+}
+
+/* Binary content: len bytes exactly, NULs included. Refused if it does not fit. */
+int exfs_write_bytes(const char *path, const void *buf, int len) {
+    exfs_init();
+    EXFSNode *n = exfs_find(path);
+    if (!n || n->type != TYPE_FILE) return EXFS_ERR_NOTFILE;
+    if (len < 0 || len > EXFS_DATA_MAX - 1) return EXFS_ERR_TRUNC;
+    return store_bytes(n, (const uint8_t *)buf, len);
+}
+
+/* Copies up to max-1 bytes and NUL-terminates. Returns the bytes copied (0 for
+ * a file never written), or EXFS_ERR_NOTFILE / EXFS_ERR_DENIED. */
 int exfs_read_data(const char *path, char *out, int max) {
     exfs_init();
     if (max < 1) return EXFS_ERR_NOTFILE;
@@ -82,7 +95,6 @@ int exfs_read_data(const char *path, char *out, int max) {
     return i;
 }
 
-/* Byte length of a file's data (0 if never written), or -1 if there is no file. */
 int exfs_size(const char *raw_path) {
     exfs_init();
     EXFSNode *n = exfs_find(raw_path);
