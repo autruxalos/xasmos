@@ -32,11 +32,13 @@ SRCS := arch/amd64/boot/exord/efi/efi_main.c \
         arch/amd64/apps/xsh/utils/pci.c \
         arch/amd64/drivers/storage/nvme/nvme.c \
         arch/amd64/apps/xsh/utils/nvme.c \
+        arch/amd64/apps/xsh/utils/fs.c \
         arch/amd64/apps/xsh/images/images.c \
         arch/amd64/syslib/core/path.c \
         arch/amd64/drivers/storage/exfs/table.c \
         arch/amd64/drivers/storage/exfs/path.c \
         arch/amd64/drivers/storage/exfs/data.c \
+        arch/amd64/drivers/storage/exfs/store.c \
         core/xerlibc/src/mem.c \
         core/xerlibc/src/str.c \
         core/xerlibc/src/fmt.c \
