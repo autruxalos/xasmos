@@ -1,6 +1,6 @@
 /******************************************************************************
  * XASMOS - EXFS implementation
- * Path: source/core/fs/exfs.c
+ * Path: source/core/exfs/exfs.c
  ******************************************************************************/
 #include "exfs.h"
 
@@ -12,25 +12,27 @@
 static const uint8_t MAGIC[MAGIC_LEN] = { 'X', 'A', 'S', 'M', 'F', 'S', '2', 0 };
 
 static struct {
-    BlkDev    *dev;
-    uint32_t   spb;                             /* sectors per block          */
-    uint64_t   total;                           /* blocks on the volume       */
-    uint64_t   gen;                             /* committed generation       */
-    uint64_t   itab_start;                      /* committed inode table area */
-    int        mounted;
-    int        broken;
-    int        dirty;                           /* something to commit        */
-    uint8_t    bitmap[EXFS_MAX_BLOCKS / 8];       /* 1 = block in use           */
-    uint32_t   group_free[EXFS_MAX_GROUPS];
-    uint64_t   hint;                            /* where the next search starts */
-    ExfsFile     files[EXFS_INODES];
-    ExfsExtent   defer[EXFS_DEFER_MAX];             /* freed after the next commit */
-    uint32_t   ndefer;
-    ExfsExtent   fresh[EXFS_MAX_EXT];               /* extents of the current write */
-    ExfsExtent   stage[EXFS_MAX_EXT];               /* new extent list being built  */
-    uint32_t   nstage;
-    uint8_t    page[EXFS_BLOCK];
-    uint8_t    itab[EXFS_ITAB_BLOCKS * EXFS_BLOCK];
+    BlkDev     *dev;
+    uint32_t    spb;                            /* sectors per block          */
+    uint64_t    total;                          /* blocks on the volume       */
+    uint64_t    gen;                            /* committed generation       */
+    uint64_t    itab_start;                     /* committed inode table area */
+    int         mounted;
+    int         broken;
+    int         dirty;                          /* something to commit        */
+    uint8_t     bitmap[EXFS_MAX_BLOCKS / 8];    /* 1 = block in use           */
+    uint32_t    group_free[EXFS_MAX_GROUPS];
+    uint64_t    hint;                           /* where the next search starts */
+    ExfsFile    files[EXFS_INODES];
+    ExfsExtent  pool[EXFS_POOL_EXT];            /* extent lists of all files  */
+    uint8_t     pool_used[EXFS_POOL_EXT / 8];
+    ExfsExtent  defer[EXFS_DEFER_MAX];          /* freed after the next commit */
+    uint32_t    ndefer;
+    ExfsExtent  fresh[EXFS_MAX_EXT];            /* extents of the current write */
+    ExfsExtent  stage[EXFS_MAX_EXT];            /* new extent list being built  */
+    uint32_t    nstage;
+    uint8_t     page[EXFS_BLOCK];
+    uint8_t     itab[EXFS_ITAB_BLOCKS * EXFS_BLOCK];
 } V;
 
 /* ---- little-endian fields ----------------------------------------------- */
@@ -142,6 +144,87 @@ static uint64_t free_blocks(void) {
     return n;
 }
 
+/* ---- extent pool --------------------------------------------------------
+ * Every file's extent list lives in one shared pool. A file owns a slice
+ * (ext_off, ext_cap) of it. Capacities are powers of two, at least 8, so a
+ * file grows by moving to a larger slice. Memory follows the extents that
+ * exist, not the worst case of every file. */
+#define POOL_MIN_CAP 8u
+#define FEXT(f) (&V.pool[(f)->ext_off])
+
+static int pool_is_used(uint32_t i) {
+    return (V.pool_used[i >> 3] >> (i & 7)) & 1;
+}
+
+static void pool_mark(uint32_t off, uint32_t cap, int on) {
+    for (uint32_t i = 0; i < cap; i++) {
+        uint32_t s = off + i;
+        if (on) V.pool_used[s >> 3] |= (uint8_t)(1u << (s & 7));
+        else    V.pool_used[s >> 3] &= (uint8_t)~(1u << (s & 7));
+    }
+}
+
+/* First free run of cap slots. Returns 1 and its offset, or 0. */
+static int pool_find(uint32_t cap, uint32_t *off) {
+    uint32_t run = 0;
+    for (uint32_t i = 0; i < EXFS_POOL_EXT; i++) {
+        if (pool_is_used(i)) { run = 0; continue; }
+        if (++run == cap) { *off = i + 1 - cap; return 1; }
+    }
+    return 0;
+}
+
+/* Packs every slice to the front, keeping the files in offset order. Slices
+ * only move down, so each forward copy is safe. */
+static void pool_compact(void) {
+    uint32_t order[EXFS_INODES], cnt = 0;
+    for (uint32_t i = 0; i < EXFS_INODES; i++) {
+        if (V.files[i].used && V.files[i].ext_cap > 0) order[cnt++] = i;
+    }
+    for (uint32_t a = 1; a < cnt; a++) {
+        uint32_t x = order[a], b = a;
+        while (b > 0 && V.files[order[b - 1]].ext_off > V.files[x].ext_off) {
+            order[b] = order[b - 1];
+            b--;
+        }
+        order[b] = x;
+    }
+    for (uint32_t i = 0; i < EXFS_POOL_EXT / 8; i++) V.pool_used[i] = 0;
+    uint32_t cursor = 0;
+    for (uint32_t a = 0; a < cnt; a++) {
+        ExfsFile *f = &V.files[order[a]];
+        if (f->ext_off != cursor) {
+            for (uint32_t k = 0; k < f->n; k++) V.pool[cursor + k] = V.pool[f->ext_off + k];
+            f->ext_off = cursor;
+        }
+        cursor += f->ext_cap;
+        pool_mark(f->ext_off, f->ext_cap, 1);
+    }
+}
+
+static uint32_t slice_cap_for(uint32_t n) {
+    uint32_t c = POOL_MIN_CAP;
+    while (c < n) c <<= 1;
+    return c;
+}
+
+/* Reserves a slice for n extents. Compacts once if the pool is fragmented.
+ * EXFS_ENOMEM if even a compacted pool cannot hold it. */
+static int pool_reserve(uint32_t n, uint32_t *off, uint32_t *cap) {
+    if (n == 0) { *off = 0; *cap = 0; return EXFS_OK; }
+    *cap = slice_cap_for(n);
+    if (!pool_find(*cap, off)) {
+        pool_compact();
+        if (!pool_find(*cap, off)) return EXFS_ENOMEM;
+    }
+    pool_mark(*off, *cap, 1);
+    return EXFS_OK;
+}
+
+static void pool_release(uint32_t off, uint32_t cap) {
+    pool_mark(off, cap, 0);
+}
+
 /* ---- block I/O ---------------------------------------------------------- */
 
 static int blk_put(uint64_t b, const uint8_t *buf) {
@@ -211,11 +294,12 @@ static void inode_encode(uint8_t *r, const ExfsFile *f) {
     uint32_t ninl = f->n < EXFS_INL ? f->n : EXFS_INL;
     put32(r + 120, ninl);
     for (uint32_t i = 0; i < ninl; i++) {
-        put64(r + 128 + i * 16, f->ext[i].start);
-        put32(r + 128 + i * 16 + 8, f->ext[i].len);
+        put64(r + 128 + i * 16, FEXT(f)[i].start);
+        put32(r + 128 + i * 16 + 8, FEXT(f)[i].len);
     }
 }
 
+/* Decodes a record. Its extents go to V.stage; mount moves them into the pool. */
 static int inode_decode(const uint8_t *r, ExfsFile *f) {
     f->used = get32(r + 0) != 0;
     f->type = get32(r + 4);
@@ -225,13 +309,15 @@ static int inode_decode(const uint8_t *r, ExfsFile *f) {
     f->dirty = 0;
     f->nchain = 0;
     f->n = 0;
+    f->ext_off = 0;
+    f->ext_cap = 0;
     if (!f->used) return EXFS_OK;
 
     uint32_t ninl = get32(r + 120);
     if (ninl > EXFS_INL) return EXFS_ENOFS;
     for (uint32_t i = 0; i < ninl; i++) {
-        f->ext[f->n].start = get64(r + 128 + i * 16);
-        f->ext[f->n].len = get32(r + 128 + i * 16 + 8);
+        V.stage[f->n].start = get64(r + 128 + i * 16);
+        V.stage[f->n].len = get32(r + 128 + i * 16 + 8);
         f->n++;
     }
     /* chain: each block holds a next pointer, a count, then the extents */
@@ -243,8 +329,8 @@ static int inode_decode(const uint8_t *r, ExfsFile *f) {
         uint32_t cnt = get32(V.page + 8);
         if (cnt > EXFS_IND_EXT || f->n + cnt > EXFS_MAX_EXT) return EXFS_ENOFS;
         for (uint32_t j = 0; j < cnt; j++) {
-            f->ext[f->n].start = get64(V.page + 16 + j * 16);
-            f->ext[f->n].len = get32(V.page + 16 + j * 16 + 8);
+            V.stage[f->n].start = get64(V.page + 16 + j * 16);
+            V.stage[f->n].len = get32(V.page + 16 + j * 16 + 8);
             f->n++;
         }
         f->chain[f->nchain++] = blk;
@@ -263,12 +349,16 @@ static int defer_push(uint64_t start, uint32_t len) {
     return EXFS_OK;
 }
 
-/* Hands a file's blocks (extents and chain) to the deferred list. */
+/* Hands a file's blocks (extents and chain) to the deferred list, and frees
+ * its slice of the pool. The blocks stay in use until the next commit. */
 static int defer_file(ExfsFile *f) {
     uint32_t need = f->n + f->nchain;
     if (V.ndefer + need > EXFS_DEFER_MAX) return EXFS_ENOMEM;
-    for (uint32_t i = 0; i < f->n; i++) defer_push(f->ext[i].start, f->ext[i].len);
+    for (uint32_t i = 0; i < f->n; i++) defer_push(FEXT(f)[i].start, FEXT(f)[i].len);
     for (uint32_t i = 0; i < f->nchain; i++) defer_push(f->chain[i], 1);
+    pool_release(f->ext_off, f->ext_cap);
+    f->ext_off = 0;
+    f->ext_cap = 0;
     f->n = 0;
     f->nchain = 0;
     return EXFS_OK;
@@ -294,9 +384,54 @@ static ExfsFile *find(const char *name) {
 }
 
 static int name_ok(const char *name) {
+    if (name[0] != '|') return 0;
     uint32_t n = 0;
     while (name[n] != '\0') n++;
-    return n > 0 && n <= EXFS_NAME_MAX;
+    if (n < 2 || n > EXFS_NAME_MAX) return 0;
+    if (name[n - 1] == '|') return 0;
+    for (uint32_t i = 1; i < n; i++) {
+        if (name[i] == '|' && name[i - 1] == '|') return 0;
+    }
+    return 1;
+}
+
+static int is_root(const char *name) {
+    return name[0] == '|' && name[1] == '\0';
+}
+
+/* The parent of "|a|b|c" is "|a|b"; the parent of "|a" is the root, which
+ * always exists. Any other parent must be a directory. */
+static int parent_ok(const char *name) {
+    int last = -1;
+    for (int i = 0; name[i] != '\0'; i++) {
+        if (name[i] == '|') last = i;
+    }
+    if (last == 0) return 1;
+    char par[EXFS_NAME_MAX + 1];
+    for (int i = 0; i < last; i++) par[i] = name[i];
+    par[last] = '\0';
+    const ExfsFile *p = find(par);
+    return p != 0 && p->type == EXFS_TYPE_DIR;
+}
+
+/* Takes a free inode slot for a new node of the given type. */
+static int make_node(const char *name, uint32_t type) {
+    for (uint32_t i = 0; i < EXFS_INODES; i++) {
+        ExfsFile *f = &V.files[i];
+        if (f->used) continue;
+        f->used = 1;
+        f->type = type;
+        f->size = 0;
+        f->n = 0;
+        f->nchain = 0;
+        f->dirty = 1;
+        uint32_t k = 0;
+        while (name[k] != '\0') { f->name[k] = name[k]; k++; }
+        f->name[k] = '\0';
+        V.dirty = 1;
+        return EXFS_OK;
+    }
+    return EXFS_ENOSPC;
 }
 
 /* ---- public: volume life cycle ------------------------------------------ */
@@ -306,9 +441,18 @@ int exfs_commit(void);
 int exfs_format(BlkDev *d) {
     if (!d || geometry(d) != EXFS_OK) return EXFS_ENOFS;
     bitmap_clear_all();
-    for (uint32_t i = 0; i < EXFS_INODES; i++) V.files[i].used = 0;
+    for (uint32_t i = 0; i < EXFS_INODES; i++) {
+        V.files[i].used = 0;
+        V.files[i].ext_off = 0;
+        V.files[i].ext_cap = 0;
+    }
+    for (uint32_t i = 0; i < EXFS_POOL_EXT / 8; i++) V.pool_used[i] = 0;
     V.ndefer = 0;
     V.gen = 0;
+    (void)make_node("|user", EXFS_TYPE_DIR);
+    (void)make_node("|root", EXFS_TYPE_DIR);
+    (void)make_node("|bin",  EXFS_TYPE_DIR);
+    (void)make_node("|boot", EXFS_TYPE_DIR);
     V.itab_start = 0;
     V.hint = EXFS_DATA_START;
     V.broken = 0;
@@ -337,17 +481,27 @@ int exfs_mount(BlkDev *d) {
 
     bitmap_clear_all();
     V.hint = EXFS_DATA_START;
+    for (uint32_t i = 0; i < EXFS_POOL_EXT / 8; i++) V.pool_used[i] = 0;
+    for (uint32_t i = 0; i < EXFS_INODES; i++) {
+        V.files[i].ext_off = 0;
+        V.files[i].ext_cap = 0;
+    }
     for (uint32_t i = 0; i < EXFS_INODES; i++) {
         if (inode_decode(V.itab + i * INODE_BYTES, &V.files[i]) != EXFS_OK) return EXFS_ENOFS;
         ExfsFile *f = &V.files[i];
         if (!f->used) continue;
+        uint32_t roff = 0, rcap = 0;
+        if (pool_reserve(f->n, &roff, &rcap) != EXFS_OK) return EXFS_ENOMEM;
+        for (uint32_t k = 0; k < f->n; k++) V.pool[roff + k] = V.stage[k];
+        f->ext_off = roff;
+        f->ext_cap = rcap;
         for (uint32_t k = 0; k < f->nchain; k++) {
             if (mark_once(f->chain[k]) != EXFS_OK) return EXFS_ENOFS;
         }
         for (uint32_t k = 0; k < f->n; k++) {
-            if (f->ext[k].len == 0) return EXFS_ENOFS;
-            for (uint32_t j = 0; j < f->ext[k].len; j++) {
-                if (mark_once(f->ext[k].start + j) != EXFS_OK) return EXFS_ENOFS;
+            if (FEXT(f)[k].len == 0) return EXFS_ENOFS;
+            for (uint32_t j = 0; j < FEXT(f)[k].len; j++) {
+                if (mark_once(FEXT(f)[k].start + j) != EXFS_OK) return EXFS_ENOFS;
             }
         }
     }
@@ -402,8 +556,8 @@ int exfs_commit(void) {
             put64(V.page, k + 1 < nind ? f->chain[k + 1] : 0);
             put32(V.page + 8, cnt);
             for (uint32_t j = 0; j < cnt; j++) {
-                put64(V.page + 16 + j * 16, f->ext[first + j].start);
-                put32(V.page + 16 + j * 16 + 8, f->ext[first + j].len);
+                put64(V.page + 16 + j * 16, FEXT(f)[first + j].start);
+                put32(V.page + 16 + j * 16 + 8, FEXT(f)[first + j].len);
             }
             if (blk_put(f->chain[k], V.page) != EXFS_OK) { V.broken = 1; return EXFS_EIO; }
         }
@@ -439,22 +593,30 @@ int exfs_create(const char *name) {
     if (V.broken) return EXFS_EBROKEN;
     if (!name_ok(name)) return EXFS_EINVAL;
     if (find(name)) return EXFS_EEXIST;
+    if (!parent_ok(name)) return EXFS_ENOENT;
+    return make_node(name, EXFS_TYPE_FILE);
+}
+
+int exfs_mkdir(const char *name) {
+    if (!V.mounted) return EXFS_ENOFS;
+    if (V.broken) return EXFS_EBROKEN;
+    if (!name_ok(name)) return EXFS_EINVAL;
+    if (find(name)) return EXFS_EEXIST;
+    if (!parent_ok(name)) return EXFS_ENOENT;
+    return make_node(name, EXFS_TYPE_DIR);
+}
+
+static int has_children(const char *dir) {
+    uint32_t dl = 0;
+    while (dir[dl] != '\0') dl++;
     for (uint32_t i = 0; i < EXFS_INODES; i++) {
-        ExfsFile *f = &V.files[i];
-        if (f->used) continue;
-        f->used = 1;
-        f->type = 0;
-        f->size = 0;
-        f->n = 0;
-        f->nchain = 0;
-        f->dirty = 1;
+        const ExfsFile *g = &V.files[i];
+        if (!g->used || g->name[dl] != '|') continue;
         uint32_t k = 0;
-        while (name[k] != '\0') { f->name[k] = name[k]; k++; }
-        f->name[k] = '\0';
-        V.dirty = 1;
-        return EXFS_OK;
+        while (k < dl && g->name[k] == dir[k]) k++;
+        if (k == dl) return 1;
     }
-    return EXFS_ENOSPC;
+    return 0;
 }
 
 int exfs_delete(const char *name) {
@@ -462,6 +624,7 @@ int exfs_delete(const char *name) {
     if (V.broken) return EXFS_EBROKEN;
     ExfsFile *f = find(name);
     if (!f) return EXFS_ENOENT;
+    if (f->type == EXFS_TYPE_DIR && has_children(name)) return EXFS_ENOTEMPTY;
     int rc = defer_file(f);
     if (rc != EXFS_OK) return rc;
     f->used = 0;
@@ -477,6 +640,7 @@ int exfs_write(const char *name, const void *buf, uint64_t len) {
     if (V.broken) return EXFS_EBROKEN;
     ExfsFile *f = find(name);
     if (!f) return EXFS_ENOENT;
+    if (f->type != EXFS_TYPE_FILE) return EXFS_EISDIR;
 
     uint64_t need = (len + EXFS_BLOCK - 1) / EXFS_BLOCK;
     uint32_t nf = 0;
@@ -491,6 +655,10 @@ int exfs_write(const char *name, const void *buf, uint64_t len) {
     }
     if (V.ndefer + f->n + f->nchain > EXFS_DEFER_MAX) { release_fresh(nf); return EXFS_ENOMEM; }
 
+    /* the new extent slice is reserved before any data moves */
+    uint32_t roff = 0, rcap = 0;
+    if (pool_reserve(nf, &roff, &rcap) != EXFS_OK) { release_fresh(nf); return EXFS_ENOMEM; }
+
     const uint8_t *src = (const uint8_t *)buf;
     uint64_t left = len;
     for (uint32_t i = 0; i < nf; i++) {
@@ -498,6 +666,7 @@ int exfs_write(const char *name, const void *buf, uint64_t len) {
             uint64_t n = left < EXFS_BLOCK ? left : EXFS_BLOCK;
             for (uint64_t j = 0; j < EXFS_BLOCK; j++) V.page[j] = j < n ? src[j] : 0;
             if (blk_put(V.fresh[i].start + k, V.page) != EXFS_OK) {
+                pool_release(roff, rcap);
                 release_fresh(nf);
                 return EXFS_EIO;
             }
@@ -507,7 +676,9 @@ int exfs_write(const char *name, const void *buf, uint64_t len) {
     }
 
     defer_file(f);
-    for (uint32_t i = 0; i < nf; i++) f->ext[i] = V.fresh[i];
+    for (uint32_t i = 0; i < nf; i++) V.pool[roff + i] = V.fresh[i];
+    f->ext_off = roff;
+    f->ext_cap = rcap;
     f->n = nf;
     f->size = len;
     f->dirty = 1;
@@ -539,11 +710,11 @@ static int stage_add(uint64_t start, uint64_t len) {
 static int walk_old(const ExfsFile *f, uint64_t lo, uint64_t hi, int mode) {
     uint64_t lpos = 0;
     for (uint32_t i = 0; i < f->n && lpos < hi; i++) {
-        uint64_t elen = f->ext[i].len;
+        uint64_t elen = FEXT(f)[i].len;
         uint64_t a = lpos > lo ? lpos : lo;
         uint64_t b = lpos + elen < hi ? lpos + elen : hi;
         if (a < b) {
-            uint64_t phys = f->ext[i].start + (a - lpos);
+            uint64_t phys = FEXT(f)[i].start + (a - lpos);
             uint64_t n = b - a;
             if (mode == 0) {
                 if (stage_add(phys, n) != EXFS_OK) return EXFS_ENOMEM;
@@ -560,11 +731,11 @@ static int walk_old(const ExfsFile *f, uint64_t lo, uint64_t hi, int mode) {
 static int old_phys(const ExfsFile *f, uint64_t l, uint64_t *phys) {
     uint64_t lpos = 0;
     for (uint32_t i = 0; i < f->n; i++) {
-        if (l < lpos + f->ext[i].len) {
-            *phys = f->ext[i].start + (l - lpos);
+        if (l < lpos + FEXT(f)[i].len) {
+            *phys = FEXT(f)[i].start + (l - lpos);
             return EXFS_OK;
         }
-        lpos += f->ext[i].len;
+        lpos += FEXT(f)[i].len;
     }
     return EXFS_ENOFS;
 }
@@ -577,11 +748,12 @@ int exfs_write_at(const char *name, uint64_t off, const void *buf, uint64_t len)
     if (V.broken) return EXFS_EBROKEN;
     ExfsFile *f = find(name);
     if (!f) return EXFS_ENOENT;
+    if (f->type != EXFS_TYPE_FILE) return EXFS_EISDIR;
     if (len == 0) return EXFS_OK;
     if (off + len < off) return EXFS_EINVAL;
 
     uint64_t oldb = 0;
-    for (uint32_t i = 0; i < f->n; i++) oldb += f->ext[i].len;
+    for (uint32_t i = 0; i < f->n; i++) oldb += FEXT(f)[i].len;
     uint64_t L0 = off / EXFS_BLOCK;
     uint64_t L1 = (off + len - 1) / EXFS_BLOCK;
     uint64_t W0 = L0 < oldb ? L0 : oldb;       /* a gap past the end starts at oldb */
@@ -610,6 +782,9 @@ int exfs_write_at(const char *name, uint64_t off, const void *buf, uint64_t len)
     }
     if (walk_old(f, L1 + 1, oldb, 0) != EXFS_OK) { release_fresh(nf); return EXFS_ENOMEM; }
 
+    uint32_t roff = 0, rcap = 0;
+    if (pool_reserve(V.nstage, &roff, &rcap) != EXFS_OK) { release_fresh(nf); return EXFS_ENOMEM; }
+
     /* data first: nothing refers to the new blocks until the metadata below */
     const uint8_t *src = (const uint8_t *)buf;
     uint64_t end = off + len;
@@ -621,6 +796,7 @@ int exfs_write_at(const char *name, uint64_t off, const void *buf, uint64_t len)
         if (!full && l < oldb) {
             uint64_t op = 0;
             if (old_phys(f, l, &op) != EXFS_OK || blk_got(op, V.page) != EXFS_OK) {
+                pool_release(roff, rcap);
                 release_fresh(nf);
                 return EXFS_EIO;
             }
@@ -635,6 +811,7 @@ int exfs_write_at(const char *name, uint64_t off, const void *buf, uint64_t len)
         for (uint64_t p = from; p < to; p++) V.page[p - bs] = src[p - off];
 
         if (blk_put(V.fresh[fi].start + fk, V.page) != EXFS_OK) {
+            pool_release(roff, rcap);
             release_fresh(nf);
             return EXFS_EIO;
         }
@@ -642,12 +819,15 @@ int exfs_write_at(const char *name, uint64_t off, const void *buf, uint64_t len)
         if (fk == V.fresh[fi].len) { fi++; fk = 0; }
     }
 
-    /* commit the change in memory: the rewritten blocks are released after
-     * the next commit, the chain is rebuilt there */
+    /* the change in memory: old blocks and the old slice are released after
+     * the next commit; the chain is rebuilt there */
     walk_old(f, W0, L1 + 1 < oldb ? L1 + 1 : oldb, 1);
     for (uint32_t i = 0; i < f->nchain; i++) defer_push(f->chain[i], 1);
+    pool_release(f->ext_off, f->ext_cap);
+    for (uint32_t i = 0; i < V.nstage; i++) V.pool[roff + i] = V.stage[i];
+    f->ext_off = roff;
+    f->ext_cap = rcap;
     f->nchain = 0;
-    for (uint32_t i = 0; i < V.nstage; i++) f->ext[i] = V.stage[i];
     f->n = V.nstage;
     if (end > f->size) f->size = end;
     f->dirty = 1;
@@ -660,6 +840,7 @@ int64_t exfs_read_at(const char *name, uint64_t off, void *buf, uint64_t cap) {
     if (!V.mounted) return EXFS_ENOFS;
     ExfsFile *f = find(name);
     if (!f) return EXFS_ENOENT;
+    if (f->type != EXFS_TYPE_FILE) return EXFS_EISDIR;
     if (off >= f->size) return 0;
 
     uint64_t want = f->size - off < cap ? f->size - off : cap;
@@ -669,8 +850,8 @@ int64_t exfs_read_at(const char *name, uint64_t off, void *buf, uint64_t cap) {
     uint64_t inblk = off % EXFS_BLOCK;
     uint32_t i = 0;
     uint64_t base = 0;
-    while (i < f->n && base + f->ext[i].len <= l) {
-        base += f->ext[i].len;
+    while (i < f->n && base + FEXT(f)[i].len <= l) {
+        base += FEXT(f)[i].len;
         i++;
     }
     if (i == f->n) return EXFS_EIO;
@@ -679,14 +860,14 @@ int64_t exfs_read_at(const char *name, uint64_t off, void *buf, uint64_t cap) {
     uint64_t done = 0;
     while (done < want) {
         if (i == f->n) return EXFS_EIO;
-        if (blk_got(f->ext[i].start + k, V.page) != EXFS_OK) return EXFS_EIO;
+        if (blk_got(FEXT(f)[i].start + k, V.page) != EXFS_OK) return EXFS_EIO;
         uint64_t avail = EXFS_BLOCK - inblk;
         uint64_t n = want - done < avail ? want - done : avail;
         for (uint64_t j = 0; j < n; j++) dst[done + j] = V.page[inblk + j];
         done += n;
         inblk = 0;
         k++;
-        if (k == f->ext[i].len) { i++; k = 0; }
+        if (k == FEXT(f)[i].len) { i++; k = 0; }
     }
     return (int64_t)done;
 }
@@ -696,7 +877,91 @@ int64_t exfs_read(const char *name, void *buf, uint64_t cap) {
     return exfs_read_at(name, 0, buf, cap);
 }
 
+/* Confirms the pending changes, then leaves the volume unmounted. A failed
+ * confirmation keeps the volume mounted, so nothing is lost. */
+int exfs_unmount(void) {
+    if (!V.mounted) return EXFS_ENOFS;
+    int rc = exfs_commit();
+    if (rc != EXFS_OK) return rc;
+    V.mounted = 0;
+    return EXFS_OK;
+}
+
+/* ---- public: queries used by the commands ------------------------------ */
+
+int exfs_is_mounted(void) {
+    return V.mounted && !V.broken;
+}
+
+/* Bytes stored in a file, or EXFS_ENOENT / EXFS_EISDIR. */
+int64_t exfs_size(const char *name) {
+    if (!V.mounted) return EXFS_ENOFS;
+    const ExfsFile *f = find(name);
+    if (!f) return EXFS_ENOENT;
+    if (f->type != EXFS_TYPE_FILE) return EXFS_EISDIR;
+    return (int64_t)f->size;
+}
+
+/* ---- public: directories ----------------------------------------------- */
+
+/* EXFS_TYPE_DIR for the root and for any directory; the file type for
+ * regular files; EXFS_ENOENT if the name does not exist. */
+int exfs_stat(const char *name) {
+    if (is_root(name)) return EXFS_TYPE_DIR;
+    const ExfsFile *f = find(name);
+    return f ? (int)f->type : EXFS_ENOENT;
+}
+
+static int starts_with(const char *s, const char *p) {
+    while (*p != '\0') {
+        if (*s != *p) return 0;
+        s++;
+        p++;
+    }
+    return 1;
+}
+
+/* Calls cb(component, type) for each direct child of dir. Returns the count. */
+int exfs_list(const char *dir, void (*cb)(const char *name, int type)) {
+    if (!V.mounted) return EXFS_ENOFS;
+    if (!is_root(dir)) {
+        const ExfsFile *d = find(dir);
+        if (!d) return EXFS_ENOENT;
+        if (d->type != EXFS_TYPE_DIR) return EXFS_EINVAL;
+    }
+
+    char pre[EXFS_NAME_MAX + 2];
+    uint32_t pl = 0;
+    if (is_root(dir)) {
+        pre[pl++] = '|';
+    } else {
+        for (uint32_t k = 0; dir[k] != '\0'; k++) pre[pl++] = dir[k];
+        pre[pl++] = '|';
+    }
+    pre[pl] = '\0';
+
+    int count = 0;
+    for (uint32_t i = 0; i < EXFS_INODES; i++) {
+        const ExfsFile *g = &V.files[i];
+        if (!g->used || !starts_with(g->name, pre)) continue;
+        const char *rest = g->name + pl;
+        if (*rest == '\0') continue;
+        int nested = 0;
+        for (const char *c = rest; *c != '\0'; c++) {
+            if (*c == '|') { nested = 1; break; }
+        }
+        if (nested) continue;
+        cb(rest, (int)g->type);
+        count++;
+    }
+    return count;
+}
+
 /* ---- public: state ------------------------------------------------------ */
+
+const ExfsExtent *exfs_extents(const ExfsFile *f) {
+    return f->n ? FEXT(f) : 0;
+}
 
 const ExfsFile *exfs_lookup(const char *name) {
     return find(name);
