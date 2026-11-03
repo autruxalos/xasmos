@@ -57,8 +57,9 @@ static int fsck(void) {
         const ExfsFile *f = exfs_file(i);
         if (!f->used) continue;
         for (uint32_t k = 0; k < f->nchain; k++) { reach_mark(f->chain[k], &dup); used++; }
-        for (uint32_t e = 0; e < f->n; e++) {
-            for (uint32_t k = 0; k < f->ext[e].len; k++) { reach_mark(f->ext[e].start + k, &dup); used++; }
+        const ExfsExtent *ex = exfs_extents(f);
+        for (uint32_t e = 0; ex && e < f->n; e++) {
+            for (uint32_t k = 0; k < ex[e].len; k++) { reach_mark(ex[e].start + k, &dup); used++; }
         }
     }
     if (dup) return 0;
