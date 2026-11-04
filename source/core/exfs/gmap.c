@@ -158,13 +158,19 @@ void gmap_commit(GMap *m) {
 int gmap_take(GMap *m, uint64_t hint, uint64_t need, uint64_t *start, uint64_t *len) {
     if (need == 0) return GMAP_ENOSPC;
     uint32_t g0 = (uint32_t)(hint / m->gb);
-    for (uint32_t k = 0; k < m->ngroups; k++) {
+    uint32_t off0 = (uint32_t)(hint % m->gb);
+    if (g0 >= m->ngroups) { g0 = 0; off0 = 0; }
+    /* the first group is searched from the hint onward; the rest from their
+     * start; finally the first group again from its start, so the blocks before
+     * the hint are not missed */
+    for (uint32_t k = 0; k <= m->ngroups; k++) {
         uint32_t g = (g0 + k) % m->ngroups;
         if (m->free[g] == 0) continue;
+        uint32_t from = (k == 0) ? off0 : 0;
         GMapEntry *e = load(m, g);
         if (!e) return GMAP_EIO;
         uint32_t valid = valid_bits(m, g);
-        uint32_t i = 0;
+        uint32_t i = from;
         while (i < valid && bit_of(e->bits, i)) i++;
         if (i == valid) continue;
         uint32_t j = i;
@@ -179,32 +185,4 @@ int gmap_take(GMap *m, uint64_t hint, uint64_t need, uint64_t *start, uint64_t *
         return GMAP_OK;
     }
     return GMAP_ENOSPC;
-}
-
-int gmap_release(GMap *m, uint64_t start, uint64_t len) {
-    for (uint64_t b = start; b < start + len; b++) {
-        uint32_t g = (uint32_t)(b / m->gb);
-        uint32_t i = (uint32_t)(b % m->gb);
-        GMapEntry *e = load(m, g);
-        if (!e) return GMAP_EIO;
-        if (!bit_of(e->bits, i)) return GMAP_EUSED;
-        bit_put(e->bits, i, 0);
-        e->dirty = 1;
-        m->free[g]++;
-    }
-    return GMAP_OK;
-}
-
-int gmap_is_used(GMap *m, uint64_t block) {
-    uint32_t g = (uint32_t)(block / m->gb);
-    uint32_t i = (uint32_t)(block % m->gb);
-    GMapEntry *e = load(m, g);
-    if (!e) return GMAP_EIO;
-    return bit_of(e->bits, i);
-}
-
-uint64_t gmap_free_total(const GMap *m) {
-    uint64_t n = 0;
-    for (uint32_t g = 0; g < m->ngroups; g++) n += m->free[g];
-    return n;
 }
