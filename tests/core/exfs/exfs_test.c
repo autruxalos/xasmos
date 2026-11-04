@@ -6,6 +6,7 @@
 #include <string.h>
 #include <stdint.h>
 #include "exfs.h"
+#include "gmap.h"
 
 #define SS      512u
 #define SECTORS (64u * 1024u * 1024u / SS)            /* 64 MiB = 16384 blocks */
