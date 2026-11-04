@@ -2,27 +2,28 @@
  * XASMOS - EXFS: 64-bit blocks, extents, copy-on-write commits
  * Path: source/core/exfs/exfs.h
  *
- * Portable: it depends only on blk.h. The kernel supplies a BlkDev; the
- * format and its crash behaviour are the same on every architecture.
+ * Portable: depends only on blk.h and its own modules (gmap, sb). The kernel
+ * supplies a BlkDev; the format and its crash behaviour are the same on every
+ * architecture.
  *
  * Disk layout, 4 KiB blocks, block numbers are 64-bit:
- *   block 0, 1       superblock copies; the newest valid generation wins
+ *   block 0, 1       superblock copies, format v3; the newest valid one wins
  *   blocks 2..9      inode table, area 0 (used by even generations)
  *   blocks 10..17    inode table, area 1 (used by odd generations)
- *   blocks 18..      file extents and extent-chain blocks, allocated on demand
- * Two fixed table areas mean a commit never has to find space for the table,
- * and the previous generation's table is never overwritten by the next commit.
+ *   blocks 18..      group map slots, file extents, extent-chain blocks
  *
- * Commit protocol (copy-on-write):
- *   1. file contents are written to blocks no committed state uses
- *   2. extent chains and the inode table are written to new blocks
- *   3. the superblock of the next generation is written last: the commit point
- *   4. only then are the blocks freed by this transaction released
- * A crash before step 3 leaves the previous generation intact. A torn
- * superblock fails its checksum and the previous generation is used instead.
+ * Free space lives in the group map (gmap.h), on disk, cached in RAM.
  *
- * Free space is a bitmap in RAM, rebuilt at mount from the reachable blocks,
- * so a crash can never leak a block permanently.
+ * Commit order (the one invariant that prevents corruption):
+ *   1. chain blocks for changed files are allocated from free blocks only
+ *   2. blocks freed by this transaction are released into the map
+ *   3. dirty map groups are written to their pending slots
+ *   4. the inode table is written to this generation's area
+ *   5. the superblock of the new generation is written: the commit point
+ *   6. pending map slots become committed
+ * Blocks freed by a transaction are in use until step 2, so no write inside the
+ * transaction can reuse them. A failure after step 1 marks the volume broken:
+ * the in-memory map has moved on, so the volume must be remounted.
  ******************************************************************************/
 #ifndef XASMOS_EXFS_H
 #define XASMOS_EXFS_H
@@ -32,8 +33,6 @@
 
 #define EXFS_BLOCK         4096u
 #define EXFS_MAX_BLOCKS    (1u << 24)          /* 64 GiB volume ceiling            */
-#define EXFS_GROUP_BLOCKS  32768u              /* 128 MiB per allocation group     */
-#define EXFS_MAX_GROUPS    (EXFS_MAX_BLOCKS / EXFS_GROUP_BLOCKS)
 #define EXFS_INODES        128
 #define EXFS_NAME_MAX      95
 #define EXFS_INL           8                   /* extents stored inside an inode   */
@@ -60,6 +59,9 @@
 #define EXFS_ENOTEMPTY (-10) /* directory still has children                    */
 #define EXFS_ENOTDIR  (-11)  /* a path component is not a directory             */
 
+#define EXFS_TYPE_FILE  0
+#define EXFS_TYPE_DIR   1
+
 typedef struct {
     uint64_t start;        /* first block */
     uint32_t len;          /* blocks, contiguous */
@@ -67,7 +69,7 @@ typedef struct {
 
 typedef struct {
     int      used;
-    uint32_t type;                        /* 0 = regular file               */
+    uint32_t type;                        /* EXFS_TYPE_FILE or EXFS_TYPE_DIR  */
     uint64_t size;                        /* bytes                          */
     char     name[EXFS_NAME_MAX + 1];
     uint32_t n;                           /* extents in the pool slice      */
@@ -78,41 +80,41 @@ typedef struct {
     int      dirty;                       /* changed since the last commit  */
 } ExfsFile;
 
-int            exfs_format(BlkDev *d);      /* destroys the device content    */
-int            exfs_mount(BlkDev *d);       /* newest valid generation        */
+/* Volume life cycle. Format destroys the device content and is not atomic:
+ * a crash during format leaves no valid volume, never a half-valid one. */
+int            exfs_format(BlkDev *d);
+int            exfs_mount(BlkDev *d);       /* newest valid superblock        */
 int            exfs_commit(void);
-int            exfs_create(const char *name);
-int            exfs_delete(const char *name);
-int            exfs_write(const char *name, const void *buf, uint64_t len);
-int64_t        exfs_read(const char *name, void *buf, uint64_t cap);
-
-/* Directories: a name is a directory, a file, or absent. The root '|' always
- * exists. Children are the names one level below: "|user|x" is a child of
- * "|user". A directory with children cannot be deleted. */
-#define EXFS_TYPE_FILE  0
-#define EXFS_TYPE_DIR   1
-int            exfs_mkdir(const char *name);
+int            exfs_unmount(void);          /* commits, then unmounts          */
 int            exfs_is_mounted(void);
-int            exfs_unmount(void);            /* commits, then unmounts         */
-int64_t        exfs_size(const char *name);   /* bytes, or a negative EXFS_E* code */
-int            exfs_stat(const char *name);   /* type, or EXFS_ENOENT           */
+int            exfs_is_used(uint64_t block); /* 1 used, 0 free, <0 error        */
+
+/* Names. A name starts with '|'. Its parent must exist and be a directory,
+ * except the root '|', which always exists. */
+int            exfs_create(const char *name);
+int            exfs_mkdir(const char *name);
+int            exfs_delete(const char *name);   /* a directory must be empty */
+int            exfs_stat(const char *name);     /* type, or EXFS_ENOENT     */
+int64_t        exfs_size(const char *name);     /* bytes, or a negative EXFS_E* */
 int            exfs_list(const char *dir, void (*cb)(const char *name, int type));
 
-/* Byte-range I/O. Any size, any offset; the caller never needs a buffer as
- * large as the file. Writing past the end leaves zeros in the gap. A failed
- * call changes nothing. */
+/* Content. exfs_write replaces the whole file; exfs_write_at changes a byte
+ * range. Any size, any offset: the caller never needs a buffer as large as the
+ * file. Writing past the end leaves zeros in the gap. A failed call changes
+ * nothing. */
+int            exfs_write(const char *name, const void *buf, uint64_t len);
 int            exfs_write_at(const char *name, uint64_t off, const void *buf, uint64_t len);
+int64_t        exfs_read(const char *name, void *buf, uint64_t cap);
 int64_t        exfs_read_at(const char *name, uint64_t off, void *buf, uint64_t cap);
 
-/* The extents of a file: f->n entries, or NULL if it has none. */
-const ExfsExtent *exfs_extents(const ExfsFile *f);
+/* Read-only views. */
+const ExfsExtent *exfs_extents(const ExfsFile *f);   /* f->n entries, or NULL */
 const ExfsFile   *exfs_lookup(const char *name);
-const ExfsFile   *exfs_file(uint32_t i);      /* i < EXFS_INODES                */
+const ExfsFile   *exfs_file(uint32_t i);             /* i < EXFS_INODES       */
 
 uint64_t       exfs_total_blocks(void);
 uint64_t       exfs_free_blocks(void);
 uint64_t       exfs_generation(void);
 uint64_t       exfs_itab_start(void);       /* first block of the committed table */
-const uint8_t *exfs_bitmap(void);
 
 #endif /* XASMOS_EXFS_H */
