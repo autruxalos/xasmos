@@ -53,6 +53,16 @@ static int fsck(void) {
     int dup = 0;
     for (uint64_t b = 0; b < EXFS_DATA_START; b++) reach_mark(b, &dup);   /* superblocks + both table areas */
     uint64_t used = EXFS_DATA_START;
+    /* each group reserves its two map slots: group 0 at EXFS_DATA_START, the
+     * others at their first two blocks */
+    for (uint64_t g = 0; g * GMAP_GROUP_MAX < total; g++) {
+        uint64_t base = g == 0 ? (uint64_t)EXFS_DATA_START : g * GMAP_GROUP_MAX;
+        for (uint64_t s2 = 0; s2 < 2; s2++) {
+            if (base + s2 >= total) continue;
+            reach_mark(base + s2, &dup);
+            used++;
+        }
+    }
     for (uint32_t i = 0; i < EXFS_INODES; i++) {
         const ExfsFile *f = exfs_file(i);
         if (!f->used) continue;
@@ -63,9 +73,9 @@ static int fsck(void) {
         }
     }
     if (dup) return 0;
-    const uint8_t *bm = exfs_bitmap();
     for (uint64_t b = 0; b < total; b++) {
-        int in_map = (bm[b >> 3] >> (b & 7)) & 1;
+        int in_map = exfs_is_used(b);
+        if (in_map < 0) return 0;
         int reachable = (reach[b >> 3] >> (b & 7)) & 1;
         if (in_map != reachable) return 0;
     }
