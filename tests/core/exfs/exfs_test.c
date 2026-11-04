@@ -355,6 +355,42 @@ int main(void) {
     }
     CHECK(psweep, "every cut of a partial rewrite leaves the old or the new content, and fsck passes");
 
+    /* 14. reuse rule: blocks freed by a transaction are not handed out inside it */
+    fresh();
+    CHECK(exfs_format(&dev) == EXFS_OK, "format for the reuse rule");
+    pattern(A, 8 * 4096, 21);
+    CHECK(exfs_create("|user|a") == EXFS_OK && exfs_write("|user|a", A, 8 * 4096) == EXFS_OK,
+          "write |user|a");
+    CHECK(exfs_commit() == EXFS_OK, "commit |user|a");
+    static ExfsExtent old_ext[EXFS_MAX_EXT];
+    uint32_t old_n = 0;
+    {
+        const ExfsFile *fa = exfs_lookup("|user|a");
+        const ExfsExtent *ex = exfs_extents(fa);
+        for (uint32_t e = 0; ex && e < fa->n; e++) old_ext[old_n++] = ex[e];
+    }
+    pattern(A, 8 * 4096, 22);
+    CHECK(exfs_write("|user|a", A, 8 * 4096) == EXFS_OK, "rewrite |user|a (its old blocks are deferred)");
+    CHECK(exfs_create("|user|b") == EXFS_OK && exfs_write("|user|b", A, 8 * 4096) == EXFS_OK,
+          "write |user|b inside the same transaction");
+    int reused = 0;
+    {
+        const ExfsFile *fb = exfs_lookup("|user|b");
+        const ExfsExtent *eb = exfs_extents(fb);
+        for (uint32_t e = 0; eb && e < fb->n; e++) {
+            for (uint32_t o = 0; o < old_n; o++) {
+                uint64_t a0 = eb[e].start, a1 = a0 + eb[e].len;
+                uint64_t b0 = old_ext[o].start, b1 = b0 + old_ext[o].len;
+                if (a0 < b1 && b0 < a1) reused = 1;
+            }
+        }
+    }
+    CHECK(!reused, "a block freed by the transaction is not reused inside it");
+    CHECK(exfs_commit() == EXFS_OK && fsck(), "commit releases the old blocks, fsck exact");
+    CHECK(exfs_mount(&dev) == EXFS_OK, "remount after the reuse test");
+    CHECK(exfs_read("|user|a", B, 8 * 4096) == 8 * 4096 && memcmp(B, A, 8 * 4096) == 0,
+          "the rewritten content survives the remount");
+    
     printf("exfs: %d passed, %d failed\n", passes, fails);
     return fails != 0;
 }
