@@ -4,6 +4,19 @@ typedef unsigned short u16;
 
 extern void xk_putchar(char c);          /* fb_console.c */
 
+/* Diagnostic: when 1, every raw status/scancode pair is written to COM1.
+ * Set to 0 once the keyboard path is confirmed. */
+#define KBD_DEBUG 1
+
+#if KBD_DEBUG
+extern void serial_puts(const char *s);
+static void kdbg_hex(u8 v) {
+    static const char h[] = "0123456789ABCDEF";
+    char b[4] = { h[v >> 4], h[v & 15], ' ', '\0' };
+    serial_puts(b);
+}
+#endif
+
 #define KBD_DATA    0x60
 #define KBD_STATUS  0x64
 #define ST_OUT_FULL 0x01
@@ -53,6 +66,11 @@ int xk_pollkey(void) {
         if (!(status & ST_OUT_FULL)) return -1;
 
         u8 sc = inb(KBD_DATA);
+#if KBD_DEBUG
+        kdbg_hex(status);
+        kdbg_hex(sc);
+        serial_puts("\n");
+#endif
         if (status & ST_AUX) continue;
 
         if (st_skip) { st_skip--; continue; }
@@ -97,22 +115,3 @@ int xk_getkey(void) {
 int xk_readline(char *buffer, int max_chars) {
     int idx = 0;
     while (1) {
-        int c = xk_getkey();
-        if (c == '\n') {
-            buffer[idx] = '\0';
-            xk_putchar('\n');
-            return idx;
-        }
-        if (c == '\b') {
-            if (idx > 0) {
-                idx--;
-                xk_putchar('\b');
-            }
-            continue;
-        }
-        if (c >= 32 && c <= 126 && idx < max_chars - 1) {
-            buffer[idx++] = (char)c;
-            xk_putchar((char)c);
-        }
-    }
-}
