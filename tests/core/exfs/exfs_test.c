@@ -38,6 +38,14 @@ static int passes, fails;
 static uint8_t A[16u << 20], B[16u << 20];
 static uint8_t reach[EXFS_MAX_BLOCKS / 8];
 
+/* Callback and counters for exfs_list. */
+static int list_count, list_dirs, list_files;
+static void count_cb(const char *name, int type) {
+    (void)name;
+    list_count++;
+    if (type == EXFS_TYPE_DIR) list_dirs++; else list_files++;
+}
+
 static void pattern(uint8_t *p, uint64_t n, uint32_t seed) {
     for (uint64_t i = 0; i < n; i++) p[i] = (uint8_t)((i * 131u + seed * 17u + (i >> 12)) & 0xFF);
 }
@@ -122,13 +130,6 @@ static void fragment_volume(void) {
 }
 
 int main(void) {
-    static int list_count, list_dirs, list_files;
-static void count_cb(const char *name, int type) {
-    (void)name;
-    list_count++;
-    if (type == EXFS_TYPE_DIR) list_dirs++; else list_files++;
-}
-    
     /* 1. blank disk: not a volume; format makes one */
     fresh();
     CHECK(exfs_mount(&dev) == EXFS_ENOFS, "blank disk: mount refuses");
@@ -171,7 +172,7 @@ static void count_cb(const char *name, int type) {
     CHECK(fsck(), "fsck after remount with chains");
 
     /* 5. superblock fallback: a torn newest superblock uses the previous one.
-     * The checksum covers bytes 0..47, so the tear goes inside that range. */
+     * The checksum covers bytes 0..4087, so the tear goes inside that range. */
     uint64_t gen_before = exfs_generation();
     pattern(A, 4096, 77);
     CHECK(exfs_create("|root|note") == EXFS_OK, "create |root|note");
@@ -362,8 +363,7 @@ static void count_cb(const char *name, int type) {
     }
     CHECK(psweep, "every cut of a partial rewrite leaves the old or the new content, and fsck passes");
 
-    /* 14. reuse rule: blocks freed by a transaction are not handed out inside it */
-        /* 13. directories: the four system directories exist after format */
+    /* 13. directories: the four system directories exist after format */
     fresh();
     CHECK(exfs_format(&dev) == EXFS_OK, "format with the system directories");
     CHECK(exfs_stat("|") == EXFS_TYPE_DIR, "the root is a directory");
@@ -390,6 +390,8 @@ static void count_cb(const char *name, int type) {
     CHECK(exfs_mkdir("|user") == EXFS_OK && exfs_stat("|user") == EXFS_TYPE_DIR,
           "mkdir recreates a directory");
     CHECK(exfs_mkdir("|user") == EXFS_EEXIST, "a duplicate directory is refused");
+
+    /* 14. reuse rule: blocks freed by a transaction are not handed out inside it */
     fresh();
     CHECK(exfs_format(&dev) == EXFS_OK, "format for the reuse rule");
     pattern(A, 8 * 4096, 21);
@@ -424,7 +426,7 @@ static void count_cb(const char *name, int type) {
     CHECK(exfs_mount(&dev) == EXFS_OK, "remount after the reuse test");
     CHECK(exfs_read("|user|a", B, 8 * 4096) == 8 * 4096 && memcmp(B, A, 8 * 4096) == 0,
           "the rewritten content survives the remount");
-    
+
     printf("exfs: %d passed, %d failed\n", passes, fails);
     return fails != 0;
 }
