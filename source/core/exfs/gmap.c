@@ -186,3 +186,31 @@ int gmap_take(GMap *m, uint64_t hint, uint64_t need, uint64_t *start, uint64_t *
     }
     return GMAP_ENOSPC;
 }
+
+int gmap_release(GMap *m, uint64_t start, uint64_t len) {
+    for (uint64_t b = start; b < start + len; b++) {
+        uint32_t g = (uint32_t)(b / m->gb);
+        uint32_t i = (uint32_t)(b % m->gb);
+        GMapEntry *e = load(m, g);
+        if (!e) return GMAP_EIO;
+        if (!bit_of(e->bits, i)) return GMAP_EUSED;
+        bit_put(e->bits, i, 0);
+        e->dirty = 1;
+        m->free[g]++;
+    }
+    return GMAP_OK;
+}
+
+int gmap_is_used(GMap *m, uint64_t block) {
+    uint32_t g = (uint32_t)(block / m->gb);
+    uint32_t i = (uint32_t)(block % m->gb);
+    GMapEntry *e = load(m, g);
+    if (!e) return GMAP_EIO;
+    return bit_of(e->bits, i);
+}
+
+uint64_t gmap_free_total(const GMap *m) {
+    uint64_t n = 0;
+    for (uint32_t g = 0; g < m->ngroups; g++) n += m->free[g];
+    return n;
+}
