@@ -363,6 +363,33 @@ static void count_cb(const char *name, int type) {
     CHECK(psweep, "every cut of a partial rewrite leaves the old or the new content, and fsck passes");
 
     /* 14. reuse rule: blocks freed by a transaction are not handed out inside it */
+        /* 13. directories: the four system directories exist after format */
+    fresh();
+    CHECK(exfs_format(&dev) == EXFS_OK, "format with the system directories");
+    CHECK(exfs_stat("|") == EXFS_TYPE_DIR, "the root is a directory");
+    CHECK(exfs_stat("|user") == EXFS_TYPE_DIR && exfs_stat("|root") == EXFS_TYPE_DIR &&
+          exfs_stat("|bin") == EXFS_TYPE_DIR && exfs_stat("|boot") == EXFS_TYPE_DIR,
+          "|user |root |bin |boot exist as directories");
+    CHECK(exfs_stat("|nope") == EXFS_ENOENT, "a missing name is ENOENT");
+    CHECK(exfs_create("|nodir|x") == EXFS_ENOENT, "a file needs its parent directory");
+    CHECK(exfs_create("|user|x") == EXFS_OK, "create |user|x inside |user");
+    list_count = list_dirs = list_files = 0;
+    CHECK(exfs_list("|", count_cb) == 4 && list_dirs == 4 && list_files == 0,
+          "the root lists exactly the four directories");
+    list_count = list_dirs = list_files = 0;
+    CHECK(exfs_list("|user", count_cb) == 1 && list_files == 1, "|user lists its one file");
+    CHECK(exfs_write("|user", A, 1) == EXFS_EISDIR, "a directory cannot be written");
+    CHECK(exfs_read("|user", B, 1) == EXFS_EISDIR, "a directory cannot be read");
+    CHECK(exfs_delete("|user") == EXFS_ENOTEMPTY, "a directory with contents cannot be deleted");
+    CHECK(exfs_delete("|user|x") == EXFS_OK && exfs_delete("|user") == EXFS_OK,
+          "empty directories can be deleted");
+    CHECK(exfs_commit() == EXFS_OK && fsck(), "commit and fsck with directories");
+    CHECK(exfs_mount(&dev) == EXFS_OK, "remount after the directory changes");
+    CHECK(exfs_stat("|bin") == EXFS_TYPE_DIR, "system directories survive a remount");
+    CHECK(exfs_stat("|user") == EXFS_ENOENT, "the deleted directory stays deleted after a remount");
+    CHECK(exfs_mkdir("|user") == EXFS_OK && exfs_stat("|user") == EXFS_TYPE_DIR,
+          "mkdir recreates a directory");
+    CHECK(exfs_mkdir("|user") == EXFS_EEXIST, "a duplicate directory is refused");
     fresh();
     CHECK(exfs_format(&dev) == EXFS_OK, "format for the reuse rule");
     pattern(A, 8 * 4096, 21);
