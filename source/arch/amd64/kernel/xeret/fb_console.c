@@ -129,12 +129,15 @@ void xk_putchar(char c) {
     advance_cursor();
 }
 
+extern void serial_puts(const char *s);
+
 void xk_print(const char *str) {
     int i;
+    serial_puts(str);
     for (i = 0; str[i] != '\0'; i++) {
         xk_putchar(str[i]);
     }
-}
+} 
 
 int xk_println(const char *str) {
     xk_print(str);
