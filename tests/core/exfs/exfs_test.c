@@ -122,6 +122,13 @@ static void fragment_volume(void) {
 }
 
 int main(void) {
+    static int list_count, list_dirs, list_files;
+static void count_cb(const char *name, int type) {
+    (void)name;
+    list_count++;
+    if (type == EXFS_TYPE_DIR) list_dirs++; else list_files++;
+}
+    
     /* 1. blank disk: not a volume; format makes one */
     fresh();
     CHECK(exfs_mount(&dev) == EXFS_ENOFS, "blank disk: mount refuses");
