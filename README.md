@@ -88,3 +88,34 @@ Equivalent commands exist for `tests/core/exfs/gmap_test.c`,
 `sb_test.c`, `tests/core/dev/dev_test.c` and `tests/core/blk/blk_test.c`.
 
 ## Repository layout
+
+make/ build fragments per architecture and boot method
+source/
+arch/amd64/ architecture code: boot, kernel, drivers, shell
+core/ portable modules
+kerncall/ kernel interface headers
+tests/ host and kernel tests
+tools/exb/ generators for test corpus and program images
+
+
+## Roadmap
+
+The project is organized in versions. The current plan is:
+
+- 0.06: persistent storage with the new filesystem, USB keyboard and storage.
+- 0.07: framebuffer display server.
+- 0.08: window manager and desktop environment.
+- 0.11: GPU driver work.
+
+These are targets, not promises, and they may change.
+
+## Contributing
+
+Contributions are welcome. By submitting a change you agree that it is
+licensed under the GPL v3 or later, the same as the rest of the project.
+Please run the host tests before submitting.
+
+## Authors
+
+- Autruxalos, project author.
+-Nishuxzd (hiliangomez7-sys), first contributor.
