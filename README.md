@@ -1,3 +1,5 @@
+   Copyright (C) 2026 <Autruxalos>
+
 # XASMOS - Native Exokernel Operating System
 
 Xasmos is an experimental high-performance exokernel operating system written entirely from scratch. This master repository brings together all of the ecosystem's independent modules into a single project.
