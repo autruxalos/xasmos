@@ -1,4 +1,4 @@
-   Copyright (C) 2026 <Autruxalos>
+   Copyright (C) 2026 Autruxalos
 
 # XASMOS - Native Exokernel Operating System
 
