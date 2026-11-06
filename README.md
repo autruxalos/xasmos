@@ -1,45 +1,90 @@
-# XASMOS - Native Exokernel Operating System
+# XASMOS
 
-Xasmos is an experimental high-performance exokernel operating system written entirely from scratch. This master repository brings together all of the ecosystem's independent modules into a single project.
+XASMOS is an exokernel for amd64, written in C and NASM, that boots through
+UEFI. Its goal is to give applications direct control over hardware resources,
+with the kernel enforcing ownership rather than abstracting it away.
 
-## 📐 Path Specification: SuperDirs (|)
+Licensed under the GNU General Public License v3.0 or later. See
+[LICENSE](LICENSE). The name and logo are covered by [TRADEMARK.md](TRADEMARK.md).
 
-Xasmos completely rejects the legacy UNIX ( / ) and DOS ( \ ) path standards. Instead, the EXFS file system introduces the SuperDir concept, using the vertical bar ( | )  as a unified path delimiter.
+## Status
 
-System Syntax Rules
-### Linear Structure:
-Paths follow the format |directory|file.asm
+Early development. The system boots on real emulated hardware (QEMU with
+OVMF) and runs an interactive shell. Many subsystems are incomplete; see
+[Roadmap](#roadmap).
 
-### Direct Mapping: 
-When typing |apps|xsh, the kernel does not traverse a hierarchical directory tree on disk. Instead, it directly looks up the indexed token |system| in the global XOBJ object table. This reduces lookup time to constant-time complexity, $\mathcal{O}(1)$.
+## Components
 
-### POSIX Independence: 
-Eliminates the logical overhead of traditional file descriptors and complex operating system system calls.
+| Component | Path | Role |
+|---|---|---|
+| exord | `source/arch/amd64/boot/exord/` | UEFI bootloader |
+| xeret | `source/arch/amd64/kernel/xeret/` | Kernel: memory, paging, interrupts, processes |
+| xsh | `source/arch/amd64/apps/xsh/` | Interactive shell and coreutils |
+| core | `source/core/` | Portable modules: EXFS, block layer, device registry, ExB loader |
+| drivers | `source/arch/amd64/drivers/` | Hardware drivers: PCI, NVMe, storage |
 
-## 🗂️ Ecosystem Architecture
+The portable code in `source/core/` does not depend on the architecture and
+is compiled and tested on the host.
 
-This master repository links together the six essential peripheral projects through modular submodules:
+## What works
 
-/boot ── EXORD: Master Boot Record (MBR) bootloader.
+- UEFI boot, with the kernel taking over from firmware services.
+- Physical and virtual memory management, with per-process address spaces.
+- PS/2 keyboard input and a framebuffer console.
+- PCI enumeration and NVMe storage (polled driver).
+- EXFS, a filesystem with directories, extents, copy-on-write commits, and
+  byte-range I/O.
+- A shell (`xsh`) with file and disk commands.
 
-/kernel/xeret ── XERET: Secure multiplexing kernel.
+## What is not finished
 
-/drivers/exfs ── EXFS: Inode-free file system driver.
+- USB (xHCI) and SATA (AHCI) drivers.
+- Persistent storage for the group map and superblock v3 in the kernel build.
+- Larger files and volumes: the current limit is 64 GiB per volume.
+- Graphical environment.
+- Legacy BIOS boot and the PS3 target, which exist as build fragments but are
+  not complete.
 
-/init ── exit: User-space initialization process.
+## Building
 
-/apps ── XSH: Exokernel shell implementing the | prompt.
+Requirements for the default target (amd64, UEFI):
 
-## 🚀 Installation and Build on Linux/Unix (preferably linux)
+- `clang` with the `x86-64` target
+- `lld-link`
+- `make`
 
-To clone the complete repository together with all of its components and set up the development environment, run the following commands in your terminal:
+```sh
+make                  # builds build/amd64-uefi/esp/EFI/BOOT/BOOTX64.EFI
+make help             # lists the available build fragments
+```
 
-# 1. Clone the master repository and download all submodules in a single step
-git clone --recursive https://github.com/autruxalos/xasmos.git
-cd xasmos
+## Running in QEMU
 
-# 2. Build the complete disk image and install the EXFS sectors
-make image
+Create a FAT image with the bootloader and a test NVMe disk. The NVMe serial
+must be `xasmos`: the storage layer refuses to write to other disks.
 
-# 3. Run the operating system directly in the hardware emulator
-make run
+```sh
+qemu-system-x86_64 \
+  -machine q35 -cpu qemu64 -m 512M \
+  -drive if=pflash,format=raw,readonly=on,file=OVMF_CODE.fd \
+  -drive file=esp.img,format=raw \
+  -drive file=xasmos.img,format=raw,if=none,id=nvm \
+  -device nvme,drive=nvm,serial=xasmos \
+  -serial stdio
+```
+
+## Tests
+
+Host tests for the portable modules, with sanitizers:
+
+```sh
+gcc -std=c11 -O1 -g -fsanitize=address,undefined -Wall -Wextra -Werror -Wpedantic \
+  -Isource/core/blk -Isource/core/exfs tests/core/exfs/exfs_test.c \
+  source/core/exfs/exfs.c source/core/exfs/gmap.c source/core/exfs/sb.c \
+  source/core/blk/blk.c -o /tmp/exfs_test && /tmp/exfs_test
+```
+
+Equivalent commands exist for `tests/core/exfs/gmap_test.c`,
+`sb_test.c`, `tests/core/dev/dev_test.c` and `tests/core/blk/blk_test.c`.
+
+## Repository layout
