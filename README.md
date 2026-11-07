@@ -118,4 +118,4 @@ Please run the host tests before submitting.
 ## Authors
 
 - Autruxalos, project author.
--Nishuxzd (hiliangomez7-sys), first contributor.
+- Nishuxzd (hiliangomez7-sys), first contributor.
