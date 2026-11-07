@@ -76,6 +76,17 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable
     UINTN mmapSize = XERET_MMAP_MAX_BYTES;
     UINTN mapKey = 0, descriptorSize = 0;
     UINT32 descriptorVersion = 0;
+    
+    /* Where this image sits in memory: the kernel must reserve it so the
+     * physical allocator never hands out its .text, .data or .bss. */
+    EFI_LOADED_IMAGE_PROTOCOL *li = 0;
+    status = BS->HandleProtocol(ImageHandle, &loadedImageGuid, (void **)&li);
+    if (status != EFI_SUCCESS || li == 0) {
+        for (;;) { __asm__ volatile ("hlt"); }  /* no image info: unsafe to continue */
+    }
+    g_hand.image_base = (UINT64)(UINTN)li->ImageBase;
+    g_hand.image_size = li->ImageSize;
+    
     status = BS->GetMemoryMap(&mmapSize, (EFI_MEMORY_DESCRIPTOR *)g_mmap_buffer,
                                &mapKey, &descriptorSize, &descriptorVersion);
     if (status != EFI_SUCCESS) {
