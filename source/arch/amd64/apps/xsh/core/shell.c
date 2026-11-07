@@ -16,6 +16,10 @@
  ******************************************************************************/
 
 /* One command line carries at most MAX_INPUT_LEN-1 characters. */
+/* Every directive implemented in utils/ is declared once, in utils.h */
+#include "../utils/utils.h"
+#include "../utils/common.h"
+
 #define MAX_INPUT_LEN 512
 #define MAX_CMD_LEN   32
 #define MAX_ARG_LEN   480
