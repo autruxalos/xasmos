@@ -1,6 +1,6 @@
 /******************************************************************************
  * XASMOS - boot volume and system disk registration
- * Path: source/arch/amd64/init/boot_volume.c
+ * Path: source/arch/amd64/init/exit/boot_volume.c
  *
  * The boot volume lives in memory and lasts until the next boot. Nothing here
  * writes to a disk. The system disk is only opened and published.
