@@ -1,6 +1,6 @@
 # XASMOS
 
-XASMOS is an exokernel for amd64, written in C and NASM, that boots through
+XASMOS is an exokernel for amd64 (for now), written in C, REXX and in the future, NASM, that boots through
 UEFI. Its goal is to give applications direct control over hardware resources,
 with the kernel enforcing ownership rather than abstracting it away.
 
