@@ -1,36 +1,18 @@
 /******************************************************************************
- * XASMOS - Coreutil: form (File/Directory Generator)
- * Path: source|arch|amd64|apps|xsh|utils|form.c
+ * XASMOS - Coreutil: form. Creates a file or a directory.
+ * Path: source/arch/amd64/apps/xsh/utils/form.c
  ******************************************************************************/
+#include "common.h"
+#include "exfs.h"
 
-#define TYPE_FILE 0
-#define TYPE_DIR  1
-
-extern int exfs_create_object(const char *raw_path, int type);
-
-// Basic string comparison utility for arguments
-static int string_equals(const char *s1, const char *s2) {
-    int i = 0;
-    while (s1[i] != '\0' && s2[i] != '\0') {
-        if (s1[i] != s2[i]) return 0;
-        i++;
-    }
-    return s1[i] == s2[i];
+static int same(const char *a, const char *b) {
+    while (*a != '\0' && *a == *b) { a++; b++; }
+    return *a == *b;
 }
 
+/* Returns an EXFS code; the shell reports errors. */
 int cmd_form_main(const char *flag, const char *path) {
-    if (!flag || !path) return -1;
-
-    int obj_type = -1;
-
-    if (string_equals(flag, "-file")) {
-        obj_type = TYPE_FILE;
-    } else if (string_equals(flag, "-dir")) {
-        obj_type = TYPE_DIR;
-    } else {
-        return -1; // Invalid flag syntax
-    }
-
-    // Creates either a standard data node or an executable binary node (.exb)
-    return exfs_create_object(path, obj_type);
+    if (same(flag, "-file")) return exfs_create(path);
+    if (same(flag, "-dir"))  return exfs_mkdir(path);
+    return EXFS_EINVAL;
 }
