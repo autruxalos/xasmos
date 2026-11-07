@@ -32,7 +32,6 @@
 
 /* Kernel console and keyboard */
 extern void xk_print(const char *str);
-extern int  xk_println(const char *str);
 extern int  xk_readline(char *buffer, int max_chars);
 extern int  xk_strcmp(const char *s1, const char *s2);
 extern void xk_clear(void);

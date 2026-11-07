@@ -6,7 +6,7 @@
 #include <xerlibc/fmt.h>
 
 extern void xk_print(const char *s);
-extern void xk_println(const char *s);
+extern int  xk_println(const char *s);
 
 static inline void put_dec(unsigned long long v) {
     char buf[24];

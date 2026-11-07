@@ -74,7 +74,7 @@ int gmap_init(GMap *m, BlkDev *d, uint64_t total, uint32_t group_blocks) {
 }
 
 int gmap_format(GMap *m) {
-    uint8_t bits[EXFS_BLOCK];
+    static uint8_t bits[EXFS_BLOCK];
     for (uint32_t g = 0; g < m->ngroups; g++) {
         m->free[g] = fresh_bits(m, g, bits);
         if (gwrite(m, g, 0, bits) != GMAP_OK) return GMAP_EIO;

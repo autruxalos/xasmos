@@ -415,7 +415,7 @@ int exfs_commit(void) {
     }
 
     /* 5. the commit point: superblock of the new generation */
-    SbFields f;
+    static SbFields f;
     for (uint32_t g = 0; g < SB_MAX_GROUPS; g++) { f.slot[g] = 0; f.free[g] = 0; }
     f.gen = gen;
     f.itab = area;
@@ -470,11 +470,11 @@ int exfs_mount(BlkDev *d) {
     if (!d || geometry(d) != EXFS_OK) return EXFS_ENOFS;
     if (gmap_init(&V.gm, d, V.total, GMAP_GROUP_MAX) != GMAP_OK) return EXFS_ENOFS;
 
-    SbFields best;
+    static SbFields best;
     int have = 0;
     for (uint64_t s = 0; s < 2; s++) {
         if (blk_got(s, V.page) != EXFS_OK) continue;
-        SbFields f;
+        static SbFields f;
         if (sb_decode(V.page, &f) != SB_OK) continue;
         if (!have || f.gen > best.gen) { best = f; have = 1; }
     }
