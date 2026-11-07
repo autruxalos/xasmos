@@ -115,3 +115,22 @@ int xk_getkey(void) {
 int xk_readline(char *buffer, int max_chars) {
     int idx = 0;
     while (1) {
+        int c = xk_getkey();
+        if (c == '\n') {
+            buffer[idx] = '\0';
+            xk_putchar('\n');
+            return idx;
+        }
+        if (c == '\b') {
+            if (idx > 0) {
+                idx--;
+                xk_putchar('\b');
+            }
+            continue;
+        }
+        if (c >= 32 && c <= 126 && idx < max_chars - 1) {
+            buffer[idx++] = (char)c;
+            xk_putchar((char)c);
+        }
+    }
+}
