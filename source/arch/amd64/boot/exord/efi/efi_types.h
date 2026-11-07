@@ -129,24 +129,34 @@ static EFI_GUID loadedImageGuid = {
  * 7-25 events..UnloadImage, 26 ExitBootServices, 27-36 ..., 37 LocateProtocol
  */
 typedef struct EFI_BOOT_SERVICES {
-    EFI_TABLE_HEADER Hdr;
-    void *_pad_a[4];
+    EFI_TABLE_HEADER Hdr;                                   /* 24 bytes         */
+    void *_pad_a[4];                                        /* 0-3              */
     EFI_STATUS (EFIAPI *GetMemoryMap)(UINTN *MemoryMapSize,
                                       EFI_MEMORY_DESCRIPTOR *MemoryMap,
                                       UINTN *MapKey,
                                       UINTN *DescriptorSize,
-                                      UINT32 *DescriptorVersion);
-    void *_pad_b[2];
-    void *_pad_c[19];
-    EFI_STATUS (EFIAPI *ExitBootServices)(EFI_HANDLE ImageHandle, UINTN MapKey);
-        void *_pad_d[9];
+                                      UINT32 *DescriptorVersion);   /* 4        */
+    void *_pad_b[2];                                        /* 5-6              */
+    void *_pad_c[9];                                        /* 7-15             */
     EFI_STATUS (EFIAPI *HandleProtocol)(EFI_HANDLE Handle,
                                         EFI_GUID *Protocol,
-                                        void **Interface);
+                                        void **Interface);  /* 16               */
+    void *_pad_e[9];                                        /* 17-25            */
+    EFI_STATUS (EFIAPI *ExitBootServices)(EFI_HANDLE ImageHandle,
+                                          UINTN MapKey);    /* 26               */
+    void *_pad_d[10];                                       /* 27-36            */
     EFI_STATUS (EFIAPI *LocateProtocol)(EFI_GUID *Protocol,
                                         void *Registration,
-                                        void **Interface);
+                                        void **Interface);  /* 37               */
 } EFI_BOOT_SERVICES;
+
+/* Compile-time check against the UEFI spec table order. A wrong index breaks
+ * the build instead of jumping into the wrong firmware function. */
+_Static_assert(sizeof(EFI_TABLE_HEADER) == 24, "EFI_TABLE_HEADER must be 24 bytes");
+_Static_assert(__builtin_offsetof(EFI_BOOT_SERVICES, GetMemoryMap)    == 24 + 4 * 8,  "GetMemoryMap is index 4");
+_Static_assert(__builtin_offsetof(EFI_BOOT_SERVICES, HandleProtocol)  == 24 + 16 * 8, "HandleProtocol is index 16");
+_Static_assert(__builtin_offsetof(EFI_BOOT_SERVICES, ExitBootServices) == 24 + 26 * 8, "ExitBootServices is index 26");
+_Static_assert(__builtin_offsetof(EFI_BOOT_SERVICES, LocateProtocol)  == 24 + 37 * 8, "LocateProtocol is index 37");
 
 typedef struct {
     EFI_TABLE_HEADER   Hdr;
@@ -182,6 +192,8 @@ typedef struct {
     UINT32              mmap_desc_version;
     UINT32              _pad;
     UINT64              phys_end;
+    UINT64              image_base;
+    UINT64              image_size;
 } XeretHandoff;
 
 #endif /* XASMOS_EFI_TYPES_H */
