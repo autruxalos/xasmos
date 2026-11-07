@@ -11,13 +11,11 @@
  *                                (like 'sudo'); the current cwd is kept
  *              xent              login back as xent (like 'su - xent')
  *
- * Volumes: the shell starts with the boot volume (|dev|rd0) mounted at the
- * root. Commands that act on volumes (mount, unmount, format, sync, install)
- * name their device explicitly.
+ * Volumes are prepared before the shell starts (see init/exit). Commands that
+ * act on volumes (mount, unmount, format, sync, install) name their device.
  ******************************************************************************/
 
-/* A typed line is the binding limit on 'write': one command line carries at
- * most MAX_INPUT_LEN-1 characters. Larger payloads arrive by other means. */
+/* One command line carries at most MAX_INPUT_LEN-1 characters. */
 #define MAX_INPUT_LEN 512
 #define MAX_CMD_LEN   32
 #define MAX_ARG_LEN   480
@@ -40,7 +38,6 @@ extern void resolve_superdir_path(const char *cwd, const char *target, char *out
 
 /* EXFS: codes and prototypes come from exfs.h */
 #include "exfs.h"
-#include "boot_volume.h"
 
 /* Every directive implemented in utils/ is declared once, in utils.h */
 #include "../utils/utils.h"
@@ -208,8 +205,8 @@ static void cmd_locate(const char *arg) {
 
     resolve_operand(arg, path);
     int st = exfs_stat(path);
-    if (st < 0)                 { report(st); return; }
-    if (st != EXFS_TYPE_DIR)    { fail("EXNOTDIR", "target is not a directory"); return; }
+    if (st < 0)              { report(st); return; }
+    if (st != EXFS_TYPE_DIR) { fail("EXNOTDIR", "target is not a directory"); return; }
     copy_str(current_cwd, path, MAX_PATH_LEN);
 }
 
@@ -219,8 +216,8 @@ static void cmd_list(const char *arg) {
     else                resolve_operand(arg, path);
 
     int st = exfs_stat(path);
-    if (st < 0)                 { report(st); return; }
-    if (st == EXFS_TYPE_FILE)   { xk_println(path); return; }
+    if (st < 0)               { report(st); return; }
+    if (st == EXFS_TYPE_FILE) { xk_println(path); return; }
 
     child_counter = 0;
     exfs_list(path, print_child);
@@ -356,7 +353,6 @@ void shell_main(void) {
     char command[MAX_CMD_LEN];
     char argument[MAX_ARG_LEN];
 
-    (void)boot_volume_init();
     xk_println("XASMOS Shell v0.05 -- 'ver' lists directives");
 
     while (1) {
