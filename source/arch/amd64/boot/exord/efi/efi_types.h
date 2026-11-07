@@ -120,7 +120,10 @@ typedef struct EFI_BOOT_SERVICES {
     void *_pad_b[2];
     void *_pad_c[19];
     EFI_STATUS (EFIAPI *ExitBootServices)(EFI_HANDLE ImageHandle, UINTN MapKey);
-    void *_pad_d[10];
+        void *_pad_d[9];
+    EFI_STATUS (EFIAPI *HandleProtocol)(EFI_HANDLE Handle,
+                                        EFI_GUID *Protocol,
+                                        void **Interface);
     EFI_STATUS (EFIAPI *LocateProtocol)(EFI_GUID *Protocol,
                                         void *Registration,
                                         void **Interface);
