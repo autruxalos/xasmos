@@ -105,6 +105,25 @@ typedef struct {
     UINT32 Reserved;
 } EFI_TABLE_HEADER;
 
+typedef struct {
+    UINT32      Revision;
+    EFI_HANDLE  ParentHandle;
+    void       *SystemTable;
+    EFI_HANDLE  DeviceHandle;
+    void       *FilePath;
+    void       *Reserved;
+    UINT32      LoadOptionsSize;
+    void       *LoadOptions;
+    void       *ImageBase;
+    UINT64      ImageSize;
+    UINT32      ImageCodeType;
+    UINT32      ImageDataType;
+} EFI_LOADED_IMAGE_PROTOCOL;
+
+static EFI_GUID loadedImageGuid = {
+    0x5B1B31A1, 0x9562, 0x11D2, {0x8E, 0x3F, 0x00, 0xA0, 0xC9, 0x69, 0x72, 0x3B}
+};
+
 /*
  * Boot Services after Hdr: 0-3 TPL/pages, 4 GetMemoryMap, 5-6 pool,
  * 7-25 events..UnloadImage, 26 ExitBootServices, 27-36 ..., 37 LocateProtocol
