@@ -1,26 +1,34 @@
-/* XASMOS - Coreutil: hexdump. Shows a file's bytes, 16 per line. The buffer
- * is static: 4 KiB on the stack would pull in __chkstk. */
+/******************************************************************************
+ * XASMOS - Coreutil: hexdump. Shows the first 256 bytes of a file.
+ * Path: source/arch/amd64/apps/xsh/utils/hexdump.c
+ ******************************************************************************/
 #include "common.h"
-#include <exfs.h>
+#include "exfs.h"
 
-extern int exfs_read_data(const char *path, char *out, int max);
+#define HEX_MAX 256u
 
-static char g_buf[EXFS_DATA_MAX];
+static uint8_t g_buf[HEX_MAX];
 
 int cmd_hexdump_main(const char *path) {
-    char line[96];
-    int n = exfs_read_data(path, g_buf, EXFS_DATA_MAX);
+    int64_t n = exfs_read(path, g_buf, HEX_MAX);
+    if (n < 0) return (int)n;
+    if (n == 0) { xk_println("(empty)"); return EXFS_OK; }
 
-    if (n == EXFS_ERR_NOTFILE) { xk_println("EXNOENT: not a file"); return -1; }
-    if (n == EXFS_ERR_DENIED)  { xk_println("EXPERM: token refused the read"); return -1; }
-    if (n < 0)                 { xk_println("EXIOERR: read failed"); return -1; }
-    if (n == 0)                { xk_println("(empty)"); return 0; }
-
-    for (int off = 0; off < n; off += 16) {
-        size_t k = (size_t)(n - off < 16 ? n - off : 16);
-        xl_hexdump_line(line, (unsigned long long)off,
-                        (const unsigned char *)g_buf + off, k);
-        xk_println(line);
+    for (uint64_t off = 0; off < (uint64_t)n; off += 16) {
+        put_hex(off, 8);
+        xk_print("  ");
+        for (uint64_t i = 0; i < 16; i++) {
+            if (off + i < (uint64_t)n) put_hex(g_buf[off + i], 2);
+            else                       xk_print("  ");
+            xk_print(" ");
+        }
+        xk_print(" ");
+        for (uint64_t i = 0; i < 16 && off + i < (uint64_t)n; i++) {
+            uint8_t c = g_buf[off + i];
+            char one[2] = { (c >= 32 && c <= 126) ? (char)c : '.', '\0' };
+            xk_print(one);
+        }
+        xk_println("");
     }
-    return 0;
+    return EXFS_OK;
 }
