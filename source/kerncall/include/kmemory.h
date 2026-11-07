@@ -35,6 +35,7 @@ typedef struct {
 
 /* Build bitmap from UEFI memory map inside XeretHandoff. Returns 0 on success. */
 int  phys_init_from_handoff(const XeretHandoff *hand);
+void phys_image_range(UINT64 *base, UINT64 *size);
 
 /* Allocate n contiguous 4 KiB frames. Returns physical address or 0 on failure. */
 UINT64 phys_alloc_frames(UINT64 n);

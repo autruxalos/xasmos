@@ -74,6 +74,15 @@ static void mark_range_used(UINT64 start, UINT64 bytes) {
     }
 }
 
+/* Kernel image range, saved from the handoff: the boot volume check reads it. */
+static UINT64 g_image_base;
+static UINT64 g_image_size;
+
+void phys_image_range(UINT64 *base, UINT64 *size) {
+    *base = g_image_base;
+    *size = g_image_size;
+}
+
 /* Called once at boot, before APs start and before xspin_lock is needed. */
 int phys_init_from_handoff(const XeretHandoff *hand) {
     const UINT8 *map;
@@ -123,11 +132,12 @@ int phys_init_from_handoff(const XeretHandoff *hand) {
         case EfiConventionalMemory:
         case EfiBootServicesCode:
         case EfiBootServicesData:
-            /* Free RAM after ExitBootServices */
+            /* Free RAM after ExitBootServices. Loader code and data are
+             * deliberately absent: they hold the kernel image itself. */
             mark_range_free(d->PhysicalStart, d->NumberOfPages);
             break;
         default:
-            /* Runtime, ACPI NVS, MMIO, reserved, ACPI reclaim: stay used */
+            /* Runtime, ACPI NVS, MMIO, reserved, ACPI reclaim, loader: stay used */
             break;
         }
     }
@@ -142,11 +152,15 @@ int phys_init_from_handoff(const XeretHandoff *hand) {
         phys_reserve_range(hand->fb.base, fb_bytes);
     }
 
-        /* The kernel image (.text, .data, .bss, including the 64 MiB boot volume)
-     * is loader memory: it must never be handed out by the allocator. */
+    /* The kernel image (.text, .data, .bss, including the 64 MiB boot volume)
+     * is loader memory: it must never be handed out by the allocator. The
+     * range is also kept so the boot report can prove the volume lies inside. */
     if (hand->image_size != 0) {
+        g_image_base = hand->image_base;
+        g_image_size = hand->image_size;
         phys_reserve_range(hand->image_base, hand->image_size);
     }
+
     return 0;
 }
 
@@ -271,3 +285,4 @@ UINT64 phys_total_count(void) {
     /* total_frames never changes after init: safe to read without the lock. */
     return g_phys.total_frames;
 }
+
