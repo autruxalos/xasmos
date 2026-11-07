@@ -142,6 +142,11 @@ int phys_init_from_handoff(const XeretHandoff *hand) {
         phys_reserve_range(hand->fb.base, fb_bytes);
     }
 
+        /* The kernel image (.text, .data, .bss, including the 64 MiB boot volume)
+     * is loader memory: it must never be handed out by the allocator. */
+    if (hand->image_size != 0) {
+        phys_reserve_range(hand->image_base, hand->image_size);
+    }
     return 0;
 }
 
