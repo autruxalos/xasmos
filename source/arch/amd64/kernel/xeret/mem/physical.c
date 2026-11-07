@@ -123,8 +123,6 @@ int phys_init_from_handoff(const XeretHandoff *hand) {
         case EfiConventionalMemory:
         case EfiBootServicesCode:
         case EfiBootServicesData:
-        case EfiLoaderCode:
-        case EfiLoaderData:
             /* Free RAM after ExitBootServices */
             mark_range_free(d->PhysicalStart, d->NumberOfPages);
             break;
