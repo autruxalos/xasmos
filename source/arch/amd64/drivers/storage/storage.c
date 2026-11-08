@@ -41,3 +41,9 @@ BlkDev *storage_device(void) {
 int storage_is_test_disk(void) {
     return g_open && g_test;
 }
+
+/* The serial the open controller reports, or 0 if no disk is open. */
+int storage_serial(char *out, unsigned max) {
+    if (!g_open) return 0;
+    return nvme_controller_serial(out, max) == BLK_OK;
+}
