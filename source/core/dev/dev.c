@@ -7,6 +7,8 @@
 static struct {
     char      name[DEV_NAME_MAX + 1];
     BlkDev   *dev;
+    char      serial[DEV_SERIAL_MAX + 1];
+    int       has_serial;
 } g_devs[DEV_MAX];
 
 static int str_eq(const char *a, const char *b) {
@@ -18,6 +20,13 @@ static int name_ok(const char *name) {
     uint32_t n = 0;
     while (name[n] != '\0') n++;
     return n > 0 && n <= DEV_NAME_MAX;
+}
+
+static int find_slot(const char *name) {
+    for (int i = 0; i < DEV_MAX; i++) {
+        if (g_devs[i].dev != 0 && str_eq(g_devs[i].name, name)) return i;
+    }
+    return -1;
 }
 
 int dev_register(const char *name, BlkDev *d) {
@@ -35,7 +44,36 @@ int dev_register(const char *name, BlkDev *d) {
     while (name[k] != '\0') { g_devs[free_slot].name[k] = name[k]; k++; }
     g_devs[free_slot].name[k] = '\0';
     g_devs[free_slot].dev = d;
+    g_devs[free_slot].has_serial = 0;
+    g_devs[free_slot].serial[0] = '\0';
     return DEV_OK;
+}
+
+int dev_set_serial(const char *name, const char *serial) {
+    if (!name || !serial) return DEV_EINVAL;
+    int i = find_slot(name);
+    if (i < 0) return DEV_ENOTFOUND;
+    uint32_t k = 0;
+    while (serial[k] != '\0' && k < DEV_SERIAL_MAX) {
+        g_devs[i].serial[k] = serial[k];
+        k++;
+    }
+    g_devs[i].serial[k] = '\0';
+    g_devs[i].has_serial = 1;
+    return DEV_OK;
+}
+
+const char *dev_serial(const char *path) {
+    const char *p = path;
+    const char *pre = DEV_PREFIX;
+    while (*pre != '\0') {
+        if (*p != *pre) return 0;
+        p++;
+        pre++;
+    }
+    int i = find_slot(p);
+    if (i < 0 || !g_devs[i].has_serial) return 0;
+    return g_devs[i].serial;
 }
 
 BlkDev *dev_lookup(const char *path) {
@@ -46,10 +84,8 @@ BlkDev *dev_lookup(const char *path) {
         p++;
         pre++;
     }
-    for (int i = 0; i < DEV_MAX; i++) {
-        if (g_devs[i].dev != 0 && str_eq(g_devs[i].name, p)) return g_devs[i].dev;
-    }
-    return 0;
+    int i = find_slot(p);
+    return i < 0 ? 0 : g_devs[i].dev;
 }
 
 int dev_list(void (*cb)(const char *name, BlkDev *d)) {
