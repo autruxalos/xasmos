@@ -27,5 +27,7 @@ BlkDev *storage_device(void);
 
 /* 1 if the open device is the test disk (serial "xasmos"), else 0. */
 int storage_is_test_disk(void);
+/* Copies the open controller's serial into out. Returns 1 on success. */
+int storage_serial(char *out, unsigned max);
 
 #endif /* XASMOS_STORAGE_H */
