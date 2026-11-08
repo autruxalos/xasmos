@@ -52,6 +52,7 @@ Requirements for the default target (amd64, UEFI):
 - `clang` with the `x86-64` target
 - `lld-link`
 - `make`
+- `rexx( regina )`
 
 ```sh
 make                  # builds build/amd64-uefi/esp/EFI/BOOT/BOOTX64.EFI
