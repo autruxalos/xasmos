@@ -457,6 +457,7 @@ int exfs_format(BlkDev *d) {
     V.mounted = 1;
     V.dirty = 1;
     (void)make_node("|user", EXFS_TYPE_DIR);
+    (void)make_node("|user|xent", EXFS_TYPE_DIR);
     (void)make_node("|root", EXFS_TYPE_DIR);
     (void)make_node("|bin",  EXFS_TYPE_DIR);
     (void)make_node("|boot", EXFS_TYPE_DIR);

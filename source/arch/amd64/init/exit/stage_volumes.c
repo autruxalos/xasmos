@@ -15,6 +15,13 @@
 #include "storage.h"
 #include "stage_volumes.h"
 #include "kmemory.h"
+#include "pci.h"
+#include "xring_table.h"
+#include "xring.h"
+#include "irqvec.h"
+#include "lapic.h"
+#include "paging.h"
+#include "capability.h"
 
 #define BOOT_VOLUME_BYTES (64u * 1024u * 1024u)
 
@@ -22,6 +29,12 @@ extern void xk_println(const char *s);
 extern void xk_print(const char *s);
 /* Hex printing for the boot report. shell's put_hex lives in xsh, which
  * is not linked into this stage, so the digits are written here. */
+static void report_dec(unsigned v) {
+    char b[12]; int i = 11; b[i] = '\0';
+    do { b[--i] = (char)('0' + v % 10); v /= 10; } while (v && i > 0);
+    xk_print(&b[i]);
+}
+
 static void report_hex(UINT64 v, unsigned width) {
     static const char h[] = "0123456789ABCDEF";
     char b[17];
@@ -61,7 +74,17 @@ static int boot_report(void) {
     return covered;
 }
 
+int nvme_irq_vector(void);
+
+void nvme_route_unbind(uint32_t ring);
+int  nvme_route_bind(uint32_t ring, void (*fn)(void *arg, uint32_t slot, int32_t st), void *arg);
+
 int stage_volumes(void) {
+    xtok_grant_init();
+    xk_println(xtok_grant_check("rd0", XTOK_OWNER_FIRST_APP, XTOK_RIGHT_READ)
+        ? "[EXIT] grant rd0 read: allowed" : "[EXIT] grant rd0 read: DENIED");
+    xk_println(xtok_grant_check("nd0", XTOK_OWNER_FIRST_APP, XTOK_RIGHT_READ)
+        ? "[EXIT] grant nd0 read: ALLOWED (wrong)" : "[EXIT] grant nd0 read: denied");
     if (ramdisk_init(&g_boot, g_boot_mem, BOOT_VOLUME_BYTES, 512u) != BLK_OK) {
         xk_println("[EXIT ERROR] boot volume memory rejected");
         return -1;
@@ -83,10 +106,78 @@ int stage_volumes(void) {
 
     if (storage_open() == STORAGE_OK && storage_device() != 0) {
         if (dev_register("nd0", storage_device()) == DEV_OK) {
+            char serial[DEV_SERIAL_MAX + 1];
+            if (storage_serial(serial, sizeof serial)) {
+                dev_set_serial("nd0", serial);
+            }
             xk_println("[EXIT] system disk |dev|nd0 registered");
         }
     } else {
         xk_println("[EXIT] no system disk: |dev|nd0 unavailable");
     }
+    {
+        const PciDev *nv = pci_find(0x01, 0x08, PCI_ANY_PROGIF, 0);
+        PciMsix mx;
+        int rc = nv ? pci_msix_info(nv, &mx) : -3;
+        if (rc == 0) {
+            xk_print("[PCI] nvme msix: ");
+            report_dec(mx.entries);
+            xk_print(" entries, BAR ");
+            report_dec(mx.bir);
+            xk_print(" +");
+            report_hex(mx.table_off, 8);
+            xk_println("");
+        } else {
+            xk_print("[PCI] nvme: no MSI-X, rc=-");
+            report_dec((unsigned)(-rc));
+            xk_println(rc == -3 ? " (no NVMe found)" : (rc == -1 ? " (no capability)" : " (table BAR not memory)"));
+        }
+    }
+
+    /* Root volume: the system disk if it holds a valid EXFS volume, otherwise
+     * the boot RAM volume. Mounting only reads; nothing is written here. */
+    {
+        BlkDev *sys = dev_lookup("|dev|nd0");
+        if (sys && exfs_mount(sys) == EXFS_OK) {
+            xk_println("[EXIT] root volume: |dev|nd0 (exfs, mounted)");
+        } else if (exfs_mount(boot) == EXFS_OK) {
+            xk_println("[EXIT] root volume: |dev|rd0 (no valid system disk)");
+        } else {
+            xk_println("[EXIT ERROR] no volume could be mounted");
+        }
+    }
+
+    /* Program ring table: the boot sets the policy, programs never do.
+     * Empty at boot, so this changes nothing until XSYS_QUEUE_CREATE exists. */
+    xrt_init(nvme_route_unbind, nvme_route_bind);
+    xrt_set_cap(XTOK_OWNER_FIRST_APP, 2);
+
+    /* Delivery test: a polled read on nd0, then a controlled window with
+     * interrupts on. The completion's MSI-X notice must be counted once. */
+    if (storage_device() != 0 && nvme_irq_vector() >= 0) {
+        uint8_t sec[512];
+        int rc = blk_read(storage_device(), 0, 1, sec);
+        __asm__ volatile ("sti; nop; nop; nop; cli");
+        UINT32 n = irq_vector_take((UINT32)nvme_irq_vector());
+        xk_print("[IRQ] nvme vector ");
+        report_hex((UINT64)nvme_irq_vector(), 2);
+        xk_print(rc == BLK_OK ? " read ok, notices=" : " read FAILED, notices=");
+        report_dec(n);
+        xk_println("");
+    }
+    {
+        uint8_t b0 = 0;
+        int st = kr_boot_selftest_nvme(&b0);
+        if (st == 0) {
+            xk_print("[RING] nvme read via ring: ok, block0 byte=");
+            report_hex(b0, 2);
+            xk_println("");
+        } else {
+            xk_print("[RING] nvme read via ring: FAILED, code -");
+            report_dec((unsigned)(-st));
+            xk_println("");
+        }
+    }
+
     return 0;
 }

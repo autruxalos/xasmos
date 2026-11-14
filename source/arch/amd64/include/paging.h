@@ -19,6 +19,8 @@
 #define XPT_PRESENT   (1ULL << 0)
 #define XPT_WRITE     (1ULL << 1)
 #define XPT_USER      (1ULL << 2)
+/* Physical address bits of a page-table entry (bits 12..51). */
+#define XPT_ADDR_MASK 0x000FFFFFFFFFF000ULL
 #define XPT_PWT       (1ULL << 3)
 #define XPT_PCD       (1ULL << 4)
 #define XPT_HUGE      (1ULL << 7)
@@ -84,6 +86,10 @@ UINT64 xpt_read_cr3(void);
 int    xas_create(XAspace *as, UINT32 owner_id);
 void   xas_destroy(XAspace *as);
 int    xas_map(XAspace *as, UINT64 virt, XToken tok, UINT32 perms);
+/* Leaf entry of a user page in the address space rooted at pml4_phys, or 0
+ * if the page is absent or huge. The syscall layer validates user pointers
+ * with it. */
+volatile UINT64 *xpt_user_pte(UINT64 pml4_phys, UINT64 va);
 int    xas_unmap(XAspace *as, UINT64 virt);
 
 /* Kernel-initiated revocation: removes every mapping of tok from every

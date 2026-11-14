@@ -8,6 +8,7 @@
  * escalate to a triple fault. Add a TSS with an IST stack for #DF later.
  ******************************************************************************/
 #include "diag.h"
+#include "irqvec.h"
 #include "xframe.h"
 
 typedef unsigned char      u8;

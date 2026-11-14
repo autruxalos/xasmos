@@ -18,7 +18,6 @@
 #include "spinlock.h"
 
 #define XPT_ENTS      512ULL
-#define XPT_ADDR_MASK 0x000FFFFFFFFFF000ULL
 #define XPT_HUGE_MASK 0x000FFFFFFFE00000ULL
 #define FOUR_GIB      0x100000000ULL
 #define PML4_SPAN     (1ULL << 39)          /* 512 GiB */
@@ -288,6 +287,12 @@ static volatile UINT64 *walk_pte(UINT64 pml4_phys, UINT64 va) {
     e = tbl(e & XPT_ADDR_MASK)[(va >> 21) & 0x1FF];
     if (!(e & XPT_PRESENT) || (e & XPT_HUGE)) return 0;
     return tbl(e & XPT_ADDR_MASK) + ((va >> 12) & 0x1FF);
+}
+
+/* Leaf entry of a user page in the given address space, or 0 if the page is
+ * absent or huge. Used by the syscall layer to validate user pointers. */
+volatile UINT64 *xpt_user_pte(UINT64 pml4_phys, UINT64 va) {
+    return walk_pte(pml4_phys, va);
 }
 
 static int map_page(UINT64 pml4_phys, UINT64 va, UINT64 pa, UINT64 leaf) {

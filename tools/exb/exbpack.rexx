@@ -56,20 +56,20 @@ read_bin: procedure
     call stream name, 'c', 'close'
     return ''
   end
-  data = charin(name, 1, size)
+  chunk = charin(name, 1, size)
   call stream name, 'c', 'close'
-  return data
+  return chunk
 
 write_bin: procedure
-  parse arg name, data
+  parse arg name, chunk
   call stream name, 'c', 'close'
   call stream name, 'c', 'open write replace'
-  call charout name, data
+  call charout name, chunk
   call stream name, 'c', 'close'
   return
 
 /* ---- the builder: port of Img.__init__ + fix() ----------------------------
- * Inputs (stems): nseg/ncap counts, seg.i.{vaddr,mem,flags,data}, cap.i.{kind,val}. */
+ * Inputs (stems): nseg/ncap counts, seg.i.{pva,mem,flags,chunk}, cap.i.{kind,val}. */
 build_image:
   parse arg nseg, ncap, entry, fkind
   so = 64
@@ -130,7 +130,7 @@ do_base:
 /* ---- elf2exb: port of elf2exb() ------------------------------------------ */
 do_elf2exb:
   parse arg inp out opts
-  stack = 0; heap = 0; tokens = 0
+  stack = 8192; heap = 16; tokens = 4
   nw = words(opts); k = 1
   do while k <= nw
     w = word(opts, k); v = word(opts, k + 1)
@@ -154,16 +154,16 @@ do_elf2exb:
   do i = 0 to phnum - 1
     p = phoff + i * phentsize
     if le(e, p, 4) <> 1 then iterate
-    pflags = le(e, p + 4, 4); poff = le(e, p + 8, 8); vaddr = le(e, p + 16, 8)
+    pflags = le(e, p + 4, 4); poff = le(e, p + 8, 8); pva = le(e, p + 16, 8)
     filesz = le(e, p + 32, 8); memsz = le(e, p + 40, 8)
-    if vaddr // 4096 <> 0 then do
-      say 'segment at 0x'd2x(vaddr) 'is not page-aligned: link with xent.ld'; exit 2
+    if pva // 4096 <> 0 then do
+      say 'segment at 0x'd2x(pva) 'is not page-aligned: link with xent.ld'; exit 2
     end
-    if vaddr < VA_MIN | vaddr >= VA_LIMIT then do
-      say 'segment at 0x'd2x(vaddr) 'is outside the user range: link with xent.ld'; exit 2
+    if pva < VA_MIN | pva >= VA_LIMIT then do
+      say 'segment at 0x'd2x(pva) 'is outside the user range: link with xent.ld'; exit 2
     end
     nseg = nseg + 1
-    seg.nseg.vaddr = vaddr
+    seg.nseg.vaddr = pva
     seg.nseg.mem = memsz
     seg.nseg.flags = 1 + bitand(pflags, 2) + 4 * bitand(pflags, 1)
     seg.nseg.data = substr(e, poff + 1, filesz)

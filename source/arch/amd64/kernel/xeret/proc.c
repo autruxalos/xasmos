@@ -17,6 +17,11 @@
 #include "diag.h"
 #include "lapic.h"
 #include "xsys.h"
+#include "irqvec.h"
+#include "xring_table.h"
+
+/* NVMe asynchronous completions: drained outside any interrupt handler. */
+uint32_t nvme_io_poll(void);
 
 /* Plain globals (not static): the asm below refers to them by name. */
 UINT64 g_xproc_resume_rsp;
@@ -125,7 +130,7 @@ static void user_hook(ExcFrame *f, unsigned long long cr2) {
             g_res->rip    = f->rip;
             xproc_leave_asm(XPROC_YIELD);
         default:
-            if (f->rax >= XSYS_ALLOC && f->rax <= XSYS_INFO && g_as) {
+            if (g_as) {
                 xsys_resource(g_as, f);
                 return;
             }
@@ -158,6 +163,10 @@ static void irq_hook(ExcFrame *f, unsigned long long cr2) {
     }
     if (f->vector == LAPIC_SPURIOUS_VEC) {
         return;                                  /* spurious: must NOT be EOI'd */
+    }
+    if (irq_vector_notice((unsigned int)f->vector)) {
+        lapic_eoi();                             /* after the driver saw the notice */
+        return;
     }
     g_irq_unexpected++;
     g_irq_last = f->vector;
@@ -217,9 +226,12 @@ int xproc_run_ctx(XAspace *as, XContext *ctx, XProcResult *res) {
         lapic_timer_arm(g_quantum_ticks);
     }
 
+    nvme_io_poll();                          /* ring 0, no lock held */
     int r = (int)xproc_enter_asm(as->pml4_phys, ctx);
 
     if (armed) lapic_timer_stop();
+    nvme_io_poll();                          /* completions posted while the program ran */
+    xrt_reap();                                              /* ring 0, no locks: release drained closing rings */
     g_res = 0;
     g_ctx = 0;
     g_as  = 0;

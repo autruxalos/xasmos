@@ -13,6 +13,7 @@ typedef unsigned long long u64;
 #define APIC_BASE_X2     (1ULL << 10)
 #define APIC_BASE_EN     (1ULL << 11)
 
+#define REG_ID           0x020u
 #define REG_EOI          0x0B0u
 #define REG_SVR          0x0F0u
 #define REG_LVT_TIMER    0x320u
@@ -128,6 +129,11 @@ void lapic_timer_stop(void) {
     if (!g_ready) return;
     lwrite(REG_TIMER_INIT, 0);
     lwrite(REG_LVT_TIMER, LVT_MASKED | LAPIC_TIMER_VEC);
+}
+
+/* APIC ID of the CPU running this code (xAPIC: bits 31:24 of the ID register). */
+u32 lapic_id(void) {
+    return (lread(REG_ID) >> 24) & 0xFFu;
 }
 
 void lapic_eoi(void) {

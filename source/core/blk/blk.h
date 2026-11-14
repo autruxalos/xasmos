@@ -20,11 +20,28 @@
 #define BLK_E_RANGE   (-2)   /* lba + count runs past the end of the device    */
 #define BLK_E_IO      (-3)   /* the device reported an error                    */
 #define BLK_E_TIMEOUT (-4)   /* the device did not answer in time               */
+#define BLK_E_BUSY    (-5)   /* no room to submit now: nothing was written   */
 
+/* Asynchronous request: the device takes it and completes it later, or the
+ * device has no submit and the caller transfers synchronously. */
+#define BLK_OP_READ  0u
+#define BLK_OP_WRITE 1u
+typedef struct BlkReq {
+    uint64_t lba;      /* absolute first block on the device */
+    uint32_t count;    /* blocks, at most 8 (one 4 KiB frame) */
+    uint32_t op;       /* BLK_OP_READ or BLK_OP_WRITE */
+    uint64_t phys;     /* physical address of the data frame */
+    uint32_t ring;     /* ring id, used to route the completion */
+    uint32_t slot;     /* ring slot, returned with the completion */
+} BlkReq;
+
+/* submit: 0 if the device took the request, XQ_ST_BUSY if it has no room,
+ * another negative code if it refused. NULL means synchronous device. */
 typedef struct BlkOps {
     int (*read)(void *ctx, uint64_t lba, uint32_t count, void *buf);
     int (*write)(void *ctx, uint64_t lba, uint32_t count, const void *buf);
     int (*flush)(void *ctx);
+    int (*submit)(void *ctx, const BlkReq *req);
 } BlkOps;
 
 typedef struct BlkDev {

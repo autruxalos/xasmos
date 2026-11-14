@@ -45,7 +45,7 @@ extern void resolve_superdir_path(const char *cwd, const char *target, char *out
 /* Every directive implemented in utils/ is declared once, in utils.h */
 #include "../utils/utils.h"
 
-static char current_cwd[MAX_PATH_LEN]  = "|";
+static char current_cwd[MAX_PATH_LEN]  = "|user|xent";
 static char current_user[MAX_USER_LEN] = DEFAULT_USER;
 static int  is_superuser = 0;
 
@@ -198,7 +198,7 @@ static int cmd_sprusr(const char *arg) {
 
 static void cmd_xent(void) {
     set_identity(DEFAULT_USER, 0);
-    copy_str(current_cwd, "|", MAX_PATH_LEN);
+    copy_str(current_cwd, "|user|xent", MAX_PATH_LEN);
     xk_println("login: xent");
 }
 

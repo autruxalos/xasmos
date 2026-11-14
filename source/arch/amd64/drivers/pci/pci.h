@@ -48,4 +48,16 @@ void     pci_write32(uint8_t bus, uint8_t dev, uint8_t fn, uint8_t off, uint32_t
 int  pci_decode_bar(uint32_t raw_lo, uint32_t raw_hi, uint32_t m_lo, uint32_t m_hi,
                     uint64_t *base, uint64_t *size);
 
+/* MSI-X capability, read-only. Returns 0 and fills *out, -1 if the device has
+ * no MSI-X, -2 if its table sits in a BAR that is not memory. */
+typedef struct {
+    uint8_t  cap;
+    uint16_t entries;
+    uint8_t  bir;
+    uint32_t table_off;
+} PciMsix;
+
+int  pci_msix_info(const PciDev *d, PciMsix *out);
+uint16_t pci_msix_control(const PciDev *d, uint8_t cap, int enable, int fmask);
+
 #endif /* XASMOS_PCI_H */

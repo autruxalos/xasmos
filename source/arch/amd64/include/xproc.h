@@ -14,13 +14,24 @@
 #define XSYS_YIELD  3u    /* give the CPU back; resumes with rax = 0             */
 
 /* Resource syscalls. Arguments travel in rdi, rsi, rdx; nothing is ever a
- * pointer, so the kernel never dereferences user memory on their behalf.
+ * pointer, so the kernel never dereferences user memory on their behalf,
+ * with one exception: XSYS_REQUEST_BLOCKS takes a name pointer in rdi and
+ * validates it against the program's own page tables before reading.
+ * Its fourth argument travels in rcx.
  * Result: rax = status (>= 0 ok, negative = XERR_*).                       */
 #define XSYS_ALLOC  4u    /* rdi=frames rsi=rights      -> rax=0, rdx=token   */
 #define XSYS_MAP    5u    /* rdi=token rsi=virt rdx=perms (XPERM_*) -> rax    */
 #define XSYS_UNMAP  6u    /* rdi=virt                   -> rax                */
 #define XSYS_FREE   7u    /* rdi=token                  -> rax                */
 #define XSYS_INFO   8u    /* rdi=XINFO_*                -> rax=value or XERR  */
+#define XSYS_REQUEST_BLOCKS 9u  /* rdi=name ptr rsi=first block rdx=count rcx=rights -> rdx=token, rax=0 or XERR_* */
+#define XSYS_QUEUE_CREATE 10u  /* rdi=entries (16..256, pow2) -> rax=0, rdx=token */
+#define XSYS_QUEUE_RING   11u  /* rdi=token -> rax=entries processed (a hint)    */
+#define XSYS_QUEUE_CLOSE  12u  /* rdi=token -> rax=0; released once drained      */
+
+/* Size of the resource dispatch table. Every XSYS_* above must be below it:
+ * the static assert in sys.c fails the build otherwise. */
+#define XSYS_TABLE_SIZE 16u
 
 #define XINFO_FRAMES_USED   0u
 #define XINFO_FRAMES_LIMIT  1u

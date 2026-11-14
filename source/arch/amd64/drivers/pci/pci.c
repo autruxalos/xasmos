@@ -199,3 +199,67 @@ int pci_enable(const PciDev *d) {
     pci_write32(d->bus, d->dev, d->fn, PCI_CMD, cmd);
     return 0;
 }
+
+/* ---- capability list (read-only) ----------------------------------------
+ * The status register's bit 4 says whether the list exists; 0x34 holds the
+ * first pointer. Each entry is: byte 0 = capability ID, byte 1 = next pointer.
+ * Pointers below 0x40 point into the header and are refused; the walk is
+ * bounded, so a corrupt or looping list cannot hang the boot. */
+#define PCI_STATUS      0x06
+#define PCI_CAP_PTR     0x34
+#define PCI_CAP_MAX     48
+#define PCI_CAP_MSIX    0x11   /* MSI-X capability ID */
+
+static uint8_t cfg8(const PciDev *d, uint8_t off) {
+    uint32_t v = pci_read32(d->bus, d->dev, d->fn, (uint8_t)(off & 0xFCu));
+    return (uint8_t)(v >> ((off & 3u) * 8u));
+}
+
+static uint32_t cfg32(const PciDev *d, uint8_t off) {
+    return pci_read32(d->bus, d->dev, d->fn, (uint8_t)(off & 0xFCu));
+}
+
+/* Offset of the first capability with this ID, or 0 if absent. */
+static uint8_t pci_find_cap(const PciDev *d, uint8_t cap_id) {
+    if (!(cfg8(d, PCI_STATUS) & 0x10u)) return 0;
+
+    uint8_t ptr = (uint8_t)(cfg8(d, PCI_CAP_PTR) & 0xFCu);
+    for (int steps = 0; ptr >= 0x40 && steps < PCI_CAP_MAX; steps++) {
+        if (cfg8(d, ptr) == cap_id) return ptr;
+        ptr = (uint8_t)(cfg8(d, (uint8_t)(ptr + 1u)) & 0xFCu);
+    }
+    return 0;
+}
+
+/* MSI-X description, read from the device's capability. */
+/* Returns 0 and fills *out, -1 if the device has no MSI-X, or -2 if the table
+ * points at a BAR the device does not use as memory. Reads only. */
+int pci_msix_info(const PciDev *d, PciMsix *out) {
+    uint8_t cap = pci_find_cap(d, PCI_CAP_MSIX);
+    if (cap == 0) return -1;
+
+    uint16_t mc = (uint16_t)(cfg8(d, (uint8_t)(cap + 2u)) |
+                             ((uint16_t)cfg8(d, (uint8_t)(cap + 3u)) << 8));
+    uint32_t to = cfg32(d, (uint8_t)(cap + 4u));
+
+    uint8_t bir = (uint8_t)(to & 0x7u);
+    if (bir >= 6 || d->bar[bir] == 0) return -2;
+
+    out->cap       = cap;
+    out->entries   = (uint16_t)((mc & 0x7FFu) + 1u);
+    out->bir       = bir;
+    out->table_off = to & ~0x7u;
+    return 0;
+}
+
+/* Sets or clears MSI-X Enable (bit 15) and Function Mask (bit 14) in Message
+ * Control. Other bits are preserved. Returns the value read back. */
+uint16_t pci_msix_control(const PciDev *d, uint8_t cap, int enable, int fmask) {
+    uint32_t dw = pci_read32(d->bus, d->dev, d->fn, cap);
+    uint16_t mc = (uint16_t)(dw >> 16);
+    mc = (uint16_t)((mc & (uint16_t)~(0x8000u | 0x4000u)) |
+                    (enable ? 0x8000u : 0u) | (fmask ? 0x4000u : 0u));
+    dw = (dw & 0x0000FFFFu) | ((uint32_t)mc << 16);
+    pci_write32(d->bus, d->dev, d->fn, cap, dw);
+    return (uint16_t)(pci_read32(d->bus, d->dev, d->fn, cap) >> 16);
+}

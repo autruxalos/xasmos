@@ -22,6 +22,7 @@ UINT32 lapic_ticks_per_ms(void);
 int    lapic_x2apic(void);
 
 void   lapic_timer_arm(UINT32 ticks);   /* one-shot; fires LAPIC_TIMER_VEC */
+UINT32 lapic_id(void);                 /* APIC ID of the running CPU */
 void   lapic_timer_stop(void);
 void   lapic_eoi(void);
 
