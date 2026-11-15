@@ -90,7 +90,8 @@ CFLAGS := -target x86_64-unknown-windows -ffreestanding -fshort-wchar \
 # images.c includes the embedded program headers: rebuild it when they change
 $(BUILD)/obj/arch/amd64/apps/xsh/images/images.o: $(SRC_DIR)/arch/amd64/apps/xsh/images/prog_exb.h \
     $(SRC_DIR)/arch/amd64/apps/xsh/images/queue_prog_exb.h \
-    $(SRC_DIR)/arch/amd64/apps/xsh/images/nd0_prog_exb.h
+    $(SRC_DIR)/arch/amd64/apps/xsh/images/nd0_prog_exb.h \
+    $(SRC_DIR)/arch/amd64/apps/xsh/images/derive_prog_exb.h
 
 # xerlibc must not turn its own loops into calls to memcpy/memset
 $(BUILD)/obj/core/xerlibc/src/%.o: CFLAGS += -fno-builtin -mllvm -disable-loop-idiom-all

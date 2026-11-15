@@ -10,11 +10,13 @@
 #include "prog_exb.h"
 #include "queue_prog_exb.h"
 #include "nd0_prog_exb.h"
+#include "derive_prog_exb.h"
 
 static const XshImage g_images[] = {
     { "prog", prog_exb, prog_exb_len },
     { "queue_prog", queue_prog_exb, queue_prog_exb_len },
     { "nd0_prog", nd0_prog_exb, nd0_prog_exb_len },
+    { "derive_prog", derive_prog_exb, derive_prog_exb_len },
 };
 
 static int same(const char *a, const char *b) {
