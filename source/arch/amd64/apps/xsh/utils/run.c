@@ -65,7 +65,9 @@ int cmd_run_main(const char *name) {
 
     int st = XPROC_PREEMPT;
     unsigned slices = 0;
-    while (st == XPROC_PREEMPT && slices < RUN_MAX_SLICES) {
+    /* A program may give the CPU back (XPROC_YIELD) while it waits for a
+     * completion; the context is saved, so it resumes like a preempted one. */
+    while ((st == XPROC_PREEMPT || st == XPROC_YIELD) && slices < RUN_MAX_SLICES) {
         st = xproc_run_ctx(&as, &ctx, &r);
         slices++;
     }
@@ -88,7 +90,11 @@ int cmd_run_main(const char *name) {
         put_hex(r.rip, 16);
         xk_println("");
     } else {
-        xk_println("EXSTATE: unexpected run state");
+        xk_print("EXSTATE: unexpected run state reason=");
+        put_dec((unsigned long long)r.reason);
+        xk_print(" vector=");
+        put_dec((unsigned long long)r.vector);
+        xk_println("");
     }
 
     xk_print("slices=");
