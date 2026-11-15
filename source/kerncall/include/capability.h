@@ -173,4 +173,9 @@ XToken xtok_root_claim(void *dev, UINT32 owner);
 XToken xtok_derive_blocks(UINT32 owner, XToken parent, UINT64 first, UINT64 count,
                           UINT32 rights);
 
+/* Transfer of titularity. The giver must hold GIVE and the token must be free of
+ * pins, mappings and ring hold. The destination must be a live owner. Rights and
+ * range are unchanged. Returns 0, or -1. */
+int  xtok_give(UINT32 giver, XToken tok, UINT32 dest);
+
 #endif /* XASMOS_CAPABILITY_H */

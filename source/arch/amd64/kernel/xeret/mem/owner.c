@@ -38,3 +38,8 @@ int owner_retire(UINT32 id) {
     g_live[i] = 0;
     return 0;
 }
+
+int owner_is_live(UINT32 id) {
+    if (id < XOWNER_FIRST_INSTANCE || id >= XOWNER_FIRST_INSTANCE + XOWNER_MAX) return 0;
+    return g_live[id - XOWNER_FIRST_INSTANCE] ? 1 : 0;
+}

@@ -17,5 +17,6 @@
 void   owner_init(void);
 UINT32 owner_new(void);             /* a fresh id, or 0 if none is free */
 int    owner_retire(UINT32 id);     /* 0 if retired; -1 if unknown or still holding */
+int    owner_is_live(UINT32 id);    /* 1 if the id is handed out now */
 
 #endif

@@ -12,6 +12,7 @@
  * Quad included; nothing here is Zen5-specific.
  ******************************************************************************/
 #include "capability.h"
+#include "owner.h"
 #include "blk.h"
 #include "kmemory.h"
 #include "spinlock.h"
@@ -702,4 +703,24 @@ XToken xtok_derive_blocks(UINT32 owner, XToken parent, UINT64 first, UINT64 coun
 out:
     xspin_unlock(&g_lock);
     return tok;
+}
+
+/* Transfer of titularity: the token stays the same object, only owner_id moves.
+ * The destination's liveness is checked outside g_lock (owner.c has no lock).
+ * The per-owner budget of the destination is NOT checked here; see the notes. */
+int xtok_give(UINT32 giver, XToken tok, UINT32 dest) {
+    XTokenEntry *e;
+    int rc = -1;
+    if (dest == giver || !owner_is_live(dest)) return -1;
+    xspin_lock(&g_lock);
+    e = lookup_live(tok);
+    if (!e || e->owner_id != giver)                  goto out;
+    if ((e->rights & XTOK_RIGHT_GIVE) == 0)          goto out;
+    if (e->io_count != 0 || e->map_count != 0)       goto out;
+    if (e->hold != 0)                                goto out;
+    e->owner_id = dest;
+    rc = 0;
+out:
+    xspin_unlock(&g_lock);
+    return rc;
 }
