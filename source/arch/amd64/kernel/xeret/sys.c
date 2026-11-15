@@ -42,6 +42,7 @@ static int user_copy_name(XAspace *as, UINT64 ptr, char *out, UINT32 max) {
 }
 
 #include "mem/owner.h"
+#include "mem/derive_call.h"
 #define XOWNER_TABLE (XOWNER_FIRST_INSTANCE + XOWNER_MAX)
 
 typedef struct {
@@ -222,6 +223,26 @@ static void sys_queue_close(XAspace *as, ExcFrame *f) {
     ret(f, 0);                         /* released later, by xrt_reap, once drained */
 }
 
+/* ---- XSYS_DERIVE --------------------------------------------------------
+ * Attenuation only: the caller presents a parent it holds and asks for a
+ * relative subrange with rights. The child belongs to the caller. Every refusal
+ * is XERR_BADTOKEN, so the call is no oracle over tokens it does not hold.
+ * rdx is cleared first: the answer also travels in rdx. */
+static void sys_derive(XAspace *as, ExcFrame *f) {
+    UINT64 parent = f->rdi;
+    UINT64 first  = f->rsi;
+    UINT64 count  = f->rdx;
+    UINT64 rights = f->rcx;
+    XToken out = XTOKEN_INVALID;
+    f->rdx = 0;                                       /* never leave kernel bytes */
+
+    if (rights > 0xFFFFFFFFULL)                       { ret(f, XERR_BADTOKEN); return; }
+    if (xsys_derive(as->owner_id, (XToken)parent, first, count,
+                    (UINT32)rights, &out) != XDERIVE_OK) { ret(f, XERR_BADTOKEN); return; }
+    f->rdx = (unsigned long long)out;
+    ret(f, 0);
+}
+
 typedef void (*XsysHandler)(XAspace *as, ExcFrame *f);
 
 static const XsysHandler g_xsys_table[XSYS_TABLE_SIZE] = {
@@ -234,10 +255,12 @@ static const XsysHandler g_xsys_table[XSYS_TABLE_SIZE] = {
     [XSYS_QUEUE_CREATE]   = sys_queue_create,
     [XSYS_QUEUE_RING]     = sys_queue_ring,
     [XSYS_QUEUE_CLOSE]    = sys_queue_close,
+    [XSYS_DERIVE]         = sys_derive,
 };
 
 /* Every registered number must fit in the table. */
 typedef char xsys_table_fits[(XSYS_REQUEST_BLOCKS < XSYS_TABLE_SIZE) ? 1 : -1];
+typedef char xsys_derive_fits[(XSYS_DERIVE < XSYS_TABLE_SIZE) ? 1 : -1];
 
 void xsys_resource(XAspace *as, ExcFrame *f) {
     UINT64 n = f->rax;
