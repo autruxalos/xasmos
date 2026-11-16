@@ -17,6 +17,7 @@
 #include "kmemory.h"
 #include "pci.h"
 #include "xring_table.h"
+#include "mem/owner.h"
 #include "xring.h"
 #include "irqvec.h"
 #include "lapic.h"
@@ -78,6 +79,29 @@ int nvme_irq_vector(void);
 
 void nvme_route_unbind(uint32_t ring);
 int  nvme_route_bind(uint32_t ring, void (*fn)(void *arg, uint32_t slot, int32_t st), void *arg);
+
+/* Handles of the roots given to init, kept so the first program (exit) can be
+ * started with them in its registers. The boot keeps no authority over them. */
+XToken g_exit_root_rd0 = XTOKEN_INVALID;
+XToken g_exit_root_nd0 = XTOKEN_INVALID;
+
+/* Claims a disk root for the boot owner and hands it to init. The boot keeps
+ * nothing: the give moves the token, it does not copy it. Returns the handle. */
+static XToken boot_hand_root(BlkDev *d, const char *name, UINT32 boot_owner, UINT32 init_owner) {
+    XToken t = xtok_root_claim(d, boot_owner);
+    xk_print("[BOOT] root ");
+    xk_print(name);
+    if (t == XTOKEN_INVALID) {
+        xk_println(" claim FAILED");
+        return XTOKEN_INVALID;
+    }
+    if (xtok_give(boot_owner, t, init_owner) != 0) {
+        xk_println(" give FAILED");
+        return XTOKEN_INVALID;
+    }
+    xk_println(" -> init");
+    return t;
+}
 
 int stage_volumes(void) {
     xtok_grant_init();
@@ -145,6 +169,21 @@ int stage_volumes(void) {
         } else {
             xk_println("[EXIT ERROR] no volume could be mounted");
         }
+    }
+
+    /* Boot roots: the kernel mints one root per disk, the boot owner claims it,
+     * and init receives it. The pair boot -> init is policy; it moves to
+     * init.exb once the boot is a program. */
+    {
+        UINT32  boot_owner = owner_new();
+        UINT32  init_owner = owner_new();
+        BlkDev *rd = dev_lookup("|dev|rd0");
+        BlkDev *nd = dev_lookup("|dev|nd0");
+        xtok_roots_reset();
+        if (rd) xtok_root_mint(rd, boot_owner);
+        if (nd) xtok_root_mint(nd, boot_owner);
+        if (rd) g_exit_root_rd0 = boot_hand_root(rd, "rd0", boot_owner, init_owner);
+        if (nd) g_exit_root_nd0 = boot_hand_root(nd, "nd0", boot_owner, init_owner);
     }
 
     /* Program ring table: the boot sets the policy, programs never do.
