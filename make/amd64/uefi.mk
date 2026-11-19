@@ -127,7 +127,8 @@ qemu: $(IMG) $(DISK)
 	  -serial stdio
 
 # Host tests for the portable modules and the kernel-side ring logic.
-HOST_CC    := clang -std=c11 -Wall -Wextra -g -fsanitize=address,undefined
+HOST_SAN ?= -fsanitize=address,undefined
+HOST_CC  := clang -std=c11 -Wall -Wextra -g $(HOST_SAN)
 HOST_BIN   := build/host
 
 host-tests: $(HOST_BIN)/xtok_blk_test $(HOST_BIN)/xtok_pin_test $(HOST_BIN)/xring_test \
