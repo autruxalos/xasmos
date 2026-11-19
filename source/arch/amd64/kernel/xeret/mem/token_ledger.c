@@ -665,7 +665,8 @@ XToken xtok_root_claim(void *dev, UINT32 owner) {
     BlkDev *d = (BlkDev *)dev;
     if (i < 0 || g_root[i].holder != owner || !d) return XTOKEN_INVALID;
     return xtok_alloc_blocks(owner, dev, 0, d->sector_count,
-                             XTOK_RIGHT_READ | XTOK_RIGHT_WRITE | XTOK_RIGHT_RELEASE);
+                             XTOK_RIGHT_READ | XTOK_RIGHT_WRITE | XTOK_RIGHT_RELEASE |
+                             XTOK_RIGHT_GIVE);
 }
 
 /* Derivation, one lock: the parent is looked up, validated and the child slot is
