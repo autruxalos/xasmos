@@ -11,5 +11,6 @@ SECTIONS {
     . = ALIGN(0x1000);
     .data   : { *(.data*) }
     .bss    : { *(.bss*) *(COMMON) }
-    /DISCARD/ : { *(.note*) *(.comment) *(.eh_frame*) *(.gnu*) }
+    /DISCARD/ : { *(.note*) *(.comment) *(.eh_frame*) *(.gnu*)
+                 *(.dynsym) *(.dynstr) *(.hash) *(.gnu.hash) *(.dynamic) *(.interp) }
 }
