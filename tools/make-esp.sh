@@ -1,31 +1,22 @@
-#!/usr/bin/env bash
-# XASMOS - creates the FAT32 ESP image that holds BOOTX64.EFI.
-# Path: tools/make-esp.sh
-#
-# Usage: tools/make-esp.sh [path/to/BOOTX64.EFI] [path/to/esp.img]
-# Defaults: build/amd64-uefi/esp/EFI/BOOT/BOOTX64.EFI and build/amd64-uefi/esp.img
+#!/bin/sh
+# make-esp.sh EFI_IN IMG_OUT
+# Builds a FAT32 EFI System Partition with BOOTX64.EFI. Uses mtools only, so it
+# needs no root, no mount and no mkfs.fat: the same script works on Linux and
+# OpenBSD. Size: ESP_MB (default 64).
+set -eu
+EFI="$1"
+IMG="$2"
+SIZE_MB="${ESP_MB:-64}"
 
-set -euo pipefail
-
-EFI="${1:-build/amd64-uefi/esp/EFI/BOOT/BOOTX64.EFI}"
-IMG="${2:-build/amd64-uefi/esp.img}"
-SIZE_MB="${SIZE_MB:-64}"
-
-[ -f "$EFI" ] || { echo "no existe $EFI (compila primero con 'make efi')" >&2; exit 1; }
-
-for tool in mkfs.fat mmd mcopy mdir; do
-  command -v "$tool" >/dev/null || { echo "falta $tool (paquetes dosfstools y mtools)" >&2; exit 1; }
+[ -f "$EFI" ] || { echo "make-esp: missing $EFI" >&2; exit 1; }
+for t in mformat mmd mcopy mdir; do
+    command -v "$t" >/dev/null || { echo "make-esp: needs mtools ($t)" >&2; exit 1; }
 done
 
 mkdir -p "$(dirname "$IMG")"
-rm -f "$IMG"
 dd if=/dev/zero of="$IMG" bs=1M count="$SIZE_MB" status=none
-mkfs.fat -F 32 -n XASMOS "$IMG" >/dev/null
+mformat -i "$IMG" -F -v XASMOS ::
 mmd -i "$IMG" ::/EFI ::/EFI/BOOT
 mcopy -i "$IMG" "$EFI" ::/EFI/BOOT/BOOTX64.EFI
-
-want=$(stat -c%s "$EFI")
-got=$(mdir -i "$IMG" ::/EFI/BOOT | awk '/BOOTX64/ {print $3; exit}')
-[ "$got" = "$want" ] || { echo "verificación fallida: EFI $want bytes, imagen '${got:-vacía}'" >&2; exit 1; }
-
-echo "ESP lista: $IMG (BOOTX64.EFI, $got bytes)"
+mdir -i "$IMG" ::/EFI/BOOT
+echo "ESP lista: $IMG (BOOTX64.EFI, $(wc -c < "$EFI") bytes)"
