@@ -69,7 +69,11 @@ SRCS := \
         core/exb/load.c
 OBJS := $(SRCS:%.c=$(BUILD)/obj/%.o)
 
+ACCEL ?= kvm
+LLD_LINK ?= lld-link
+CLANG_RES ?= $(shell clang -print-resource-dir)
 CFLAGS := -target x86_64-unknown-windows -ffreestanding -fshort-wchar \
+          -isystem $(CLANG_RES)/include \
           -mno-red-zone -fno-stack-protector -fno-stack-check -Wall -Wextra \
           -I$(SRC_DIR)/kerncall/include \
           -I$(SRC_DIR)/arch/amd64/include \
@@ -102,7 +106,7 @@ $(BUILD)/obj/%.o: $(SRC_DIR)/%.c
 
 $(EFI_OUT): $(OBJS)
 	@mkdir -p $(dir $@)
-	lld-link /subsystem:efi_application /entry:efi_main /nodefaultlib /out:$@ $(OBJS)
+	$(LLD_LINK) /subsystem:efi_application /entry:efi_main /nodefaultlib /out:$@ $(OBJS)
 
 # ESP image: built from zero by tools/make-esp.sh, which also verifies it.
 $(IMG): $(EFI_OUT) tools/make-esp.sh
@@ -118,9 +122,15 @@ disk:
 
 # Full boot: EFI image plus the NVMe test disk. Always use this, never a
 # boot without -device nvme, or the result does not represent the system.
-qemu: $(IMG) $(DISK)
-	qemu-system-x86_64 -machine q35 -cpu qemu64 -accel kvm -m 512M \
-	  -bios $(OVMF) \
+# NVRAM for UEFI: a writable copy, created empty on first use.
+$(BUILD)/OVMF_VARS.fd:
+	mkdir -p $(BUILD)
+	dd if=/dev/zero of=$@ bs=1k count=528 status=none
+
+qemu: $(IMG) $(DISK) $(BUILD)/OVMF_VARS.fd
+	qemu-system-x86_64 -machine q35 -cpu qemu64 -accel $(ACCEL) -m 512M \
+	  -drive if=pflash,format=raw,readonly=on,file=$(OVMF) \
+	  -drive if=pflash,format=raw,file=$(BUILD)/OVMF_VARS.fd \
 	  -drive format=raw,file=$(IMG) \
 	  -drive file=$(DISK),format=raw,if=none,id=nvm \
 	  -device nvme,drive=nvm,serial=xasmos \
