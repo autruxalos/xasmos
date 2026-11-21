@@ -71,7 +71,7 @@ OBJS := $(SRCS:%.c=$(BUILD)/obj/%.o)
 
 ACCEL ?= kvm
 LLD_LINK ?= lld-link
-CLANG_RES ?= $(shell clang -print-resource-dir)
+CLANG_RES ?= third_party/clang-res/21
 CFLAGS := -target x86_64-unknown-windows -ffreestanding -fshort-wchar \
           -isystem $(CLANG_RES)/include \
           -mno-red-zone -fno-stack-protector -fno-stack-check -Wall -Wextra \
