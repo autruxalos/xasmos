@@ -12,6 +12,7 @@
 #define XTOK_KIND_MMIO   2u
 #define XTOK_KIND_IRQ    3u
 #define XTOK_KIND_BLOCKS 4u   /* a range of blocks on a registered block device */
+#define XTOK_KIND_ENDPOINT 5u /* receiver-owned transfer point (mem/endpoint.c) */
 
 #define XTOK_RIGHT_READ    (1u << 0)
 #define XTOK_RIGHT_WRITE   (1u << 1)
@@ -20,6 +21,8 @@
 #define XTOK_RIGHT_DMA     (1u << 4)
 #define XTOK_RIGHT_RELEASE (1u << 5)
 #define XTOK_RIGHT_GIVE    (1u << 6)   /* may transfer the token to another owner */
+#define XTOK_RIGHT_RECV (1u << 7)   /* endpoint: accept offers */
+#define XTOK_RIGHT_SEND (1u << 8)   /* endpoint: offer to it */
 
 #define XTOK_RIGHTS_RAM_DEFAULT \
     (XTOK_RIGHT_READ | XTOK_RIGHT_WRITE | XTOK_RIGHT_MAP | \
@@ -79,6 +82,7 @@ typedef struct {
     UINT64  start;       /* BLOCKS only: first block of the range */
     UINT32  io_count;    /* BLOCKS only: device operations in flight */
     UINT32  hold;        /* kernel-owned retention: blocks release, not mapping */
+    UINT32  frozen;      /* offered for transfer: no use, release or map until accept/cancel */
 } XTokenEntry;
 
 #define XTOK_TABLE_SLOTS  4096u
@@ -177,5 +181,13 @@ XToken xtok_derive_blocks(UINT32 owner, XToken parent, UINT64 first, UINT64 coun
  * pins, mappings and ring hold. The destination must be a live owner. Rights and
  * range are unchanged. Returns 0, or -1. */
 int  xtok_give(UINT32 giver, XToken tok, UINT32 dest);
+
+/* Endpoint layer primitives (mem/endpoint.c). The ledger only stores and
+ * freezes; policy about who may offer or accept is in endpoint.c. */
+XToken xtok_alloc_endpoint(UINT32 owner, UINT64 value, UINT32 rights);
+int    xtok_ep_value(XToken tok, UINT32 owner, UINT32 right, UINT64 *value);
+int    xtok_offer_begin(UINT32 giver, XToken tok);
+int    xtok_thaw_to(XToken tok, UINT32 owner);
+int    xtok_thaw(XToken tok);
 
 #endif /* XASMOS_CAPABILITY_H */

@@ -91,6 +91,9 @@ CFLAGS := -target x86_64-unknown-windows -ffreestanding -fshort-wchar \
           -I$(SRC_DIR)/arch/amd64/apps/xsh/utils \
           -I$(SRC_DIR)/arch/amd64/apps/xsh/images
 
+# stage_volumes.c includes the embedded exit.exb: rebuild it when the image changes
+$(BUILD)/obj/arch/amd64/init/exit/stage_volumes.o: $(SRC_DIR)/arch/amd64/init/exit/exit_prog_exb.h
+
 # images.c includes the embedded program headers: rebuild it when they change
 $(BUILD)/obj/arch/amd64/apps/xsh/images/images.o: $(SRC_DIR)/arch/amd64/apps/xsh/images/prog_exb.h \
     $(SRC_DIR)/arch/amd64/apps/xsh/images/queue_prog_exb.h \
@@ -142,7 +145,7 @@ HOST_CC  := clang -std=c11 -Wall -Wextra -g $(HOST_SAN)
 HOST_BIN   := build/host
 
 host-tests: $(HOST_BIN)/xtok_blk_test $(HOST_BIN)/xtok_pin_test $(HOST_BIN)/xring_test \
-            $(HOST_BIN)/irqvec_test $(HOST_BIN)/irqvec_mt_test $(HOST_BIN)/xqueue_test $(HOST_BIN)/nvme_xq_test $(HOST_BIN)/nvme_q_test $(HOST_BIN)/nvme_submit_test $(HOST_BIN)/nvme_route_test $(HOST_BIN)/xqueue_mt_test $(HOST_BIN)/nvme_busy_test $(HOST_BIN)/xring_inflight_test $(HOST_BIN)/xring_close_test $(HOST_BIN)/xring_table_test $(HOST_BIN)/xring_reentry_test $(HOST_BIN)/grant_range_test $(HOST_BIN)/sha512_test $(HOST_BIN)/owner_test $(HOST_BIN)/give_test $(HOST_BIN)/boot_init_test $(HOST_BIN)/derive_call_test
+            $(HOST_BIN)/irqvec_test $(HOST_BIN)/irqvec_mt_test $(HOST_BIN)/xqueue_test $(HOST_BIN)/nvme_xq_test $(HOST_BIN)/nvme_q_test $(HOST_BIN)/nvme_submit_test $(HOST_BIN)/nvme_route_test $(HOST_BIN)/xqueue_mt_test $(HOST_BIN)/nvme_busy_test $(HOST_BIN)/xring_inflight_test $(HOST_BIN)/xring_close_test $(HOST_BIN)/xring_table_test $(HOST_BIN)/xring_reentry_test $(HOST_BIN)/grant_range_test $(HOST_BIN)/sha512_test $(HOST_BIN)/owner_test $(HOST_BIN)/give_test $(HOST_BIN)/boot_init_test $(HOST_BIN)/derive_call_test $(HOST_BIN)/delegate_test $(HOST_BIN)/endpoint_test
 	@for t in $^; do echo "== $$t"; ./$$t || exit 1; done
 
 $(HOST_BIN):
@@ -318,6 +321,20 @@ $(HOST_BIN)/derive_call_test: $(HOST_BIN) tests/core/xtok/derive_call_test.c $(S
 	  -I$(SRC_DIR)/arch/amd64/boot/exord/efi -I$(SRC_DIR)/core/blk -I$(SRC_DIR)/arch/amd64/kernel/xeret/mem \
 	  tests/core/xtok/derive_call_test.c tests/core/xtok/host_stubs.c \
 	  $(SRC_DIR)/arch/amd64/kernel/xeret/mem/derive_call.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/owner.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/token_ledger.c $(SRC_DIR)/core/blk/blk.c -o $@
+
+$(HOST_BIN)/delegate_test: $(HOST_BIN) tests/core/xtok/delegate_test.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/derive_call.c \
+    $(SRC_DIR)/arch/amd64/kernel/xeret/mem/owner.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/token_ledger.c tests/core/xtok/host_stubs.c $(SRC_DIR)/core/blk/blk.c
+	$(HOST_CC) -Itests/core/xtok/stubs -Itests/core/xtok -I$(SRC_DIR)/kerncall/include \
+	  -I$(SRC_DIR)/arch/amd64/boot/exord/efi -I$(SRC_DIR)/core/blk -I$(SRC_DIR)/arch/amd64/kernel/xeret/mem \
+	  tests/core/xtok/delegate_test.c tests/core/xtok/host_stubs.c \
+	  $(SRC_DIR)/arch/amd64/kernel/xeret/mem/derive_call.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/owner.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/token_ledger.c $(SRC_DIR)/core/blk/blk.c -o $@
+
+$(HOST_BIN)/endpoint_test: $(HOST_BIN) tests/core/xtok/endpoint_test.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/endpoint.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/derive_call.c \
+    $(SRC_DIR)/arch/amd64/kernel/xeret/mem/owner.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/token_ledger.c tests/core/xtok/host_stubs.c $(SRC_DIR)/core/blk/blk.c
+	$(HOST_CC) -Itests/core/xtok/stubs -Itests/core/xtok -I$(SRC_DIR)/kerncall/include \
+	  -I$(SRC_DIR)/arch/amd64/boot/exord/efi -I$(SRC_DIR)/core/blk -I$(SRC_DIR)/arch/amd64/kernel/xeret/mem \
+	  tests/core/xtok/endpoint_test.c tests/core/xtok/host_stubs.c \
+	  $(SRC_DIR)/arch/amd64/kernel/xeret/mem/endpoint.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/derive_call.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/owner.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/token_ledger.c $(SRC_DIR)/core/blk/blk.c -o $@
 
 .PHONY: efi clean disk qemu host-tests
 
