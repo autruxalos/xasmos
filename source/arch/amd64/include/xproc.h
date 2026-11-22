@@ -30,10 +30,13 @@
 #define XSYS_QUEUE_CLOSE  12u  /* rdi=token -> rax=0; released once drained      */
 #define XSYS_DERIVE      13u  /* rdi=parent rsi=first rdx=count rcx=rights -> rdx=child, rax=0 or XERR_* */
 #define XSYS_ALLOC_FROM  14u  /* rdi=budget rsi=frames rdx=rights -> rdx=token, rax=0 or XERR_* */
+#define XSYS_BUDGET_DERIVE 15u  /* rdi=budget rsi=frames -> rdx=child, rax=0 or XERR_* */
+#define XSYS_OFFER         16u  /* rdi=token (GIVE) rsi=SEND -> rax=0 or XERR_*           */
+#define XSYS_ACCEPT        17u  /* rdi=RECV -> rdx=token, rax=0 or XERR_*                 */
 
 /* Size of the resource dispatch table. Every XSYS_* above must be below it:
  * the static assert in sys.c fails the build otherwise. */
-#define XSYS_TABLE_SIZE 16u
+#define XSYS_TABLE_SIZE 32u
 
 #define XINFO_FRAMES_USED   0u
 #define XINFO_FRAMES_LIMIT  1u

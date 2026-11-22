@@ -12,6 +12,7 @@
  * while the kernel runs one CPU with interrupts off; under SMP they must move
  * inside the ledger lock.
  ******************************************************************************/
+#include "mem/endpoint.h"
 #include "xring_table.h"
 #include "xsys.h"
 #include "dev.h"
@@ -224,6 +225,46 @@ static void sys_queue_close(XAspace *as, ExcFrame *f) {
     ret(f, 0);                         /* released later, by xrt_reap, once drained */
 }
 
+/* ---- XSYS_BUDGET_DERIVE -------------------------------------------------
+ * The caller splits a budget it owns. The parent loses exactly that balance. */
+static void sys_budget_derive(XAspace *as, ExcFrame *f) {
+    UINT64 parent = f->rdi;
+    UINT64 frames = f->rsi;
+    XToken out = XTOKEN_INVALID;
+    f->rdx = 0;
+    if (frames == 0) { ret(f, XERR_INVAL); return; }
+    if (xtok_budget_derive(as->owner_id, (XToken)parent, frames, &out) != 0) {
+        ret(f, XERR_NOMEM);
+        return;
+    }
+    f->rdx = (unsigned long long)out;
+    ret(f, 0);
+}
+
+/* ---- XSYS_OFFER ---------------------------------------------------------
+ * The caller offers its own GIVE token through a SEND it holds. The receiver's
+ * RECV decides at accept; the kernel chooses no destination. */
+static void sys_offer(XAspace *as, ExcFrame *f) {
+    if (xtok_offer(as->owner_id, (XToken)f->rdi, (XToken)f->rsi) != 0) {
+        ret(f, XERR_PERM);
+        return;
+    }
+    ret(f, 0);
+}
+
+/* ---- XSYS_ACCEPT --------------------------------------------------------
+ * Only the owner of a RECV accepts what was offered to it. */
+static void sys_accept(XAspace *as, ExcFrame *f) {
+    XToken out = XTOKEN_INVALID;
+    f->rdx = 0;
+    if (xtok_accept(as->owner_id, (XToken)f->rdi, &out) != 0) {
+        ret(f, XERR_PERM);
+        return;
+    }
+    f->rdx = (unsigned long long)out;
+    ret(f, 0);
+}
+
 /* ---- XSYS_ALLOC_FROM ----------------------------------------------------
  * Memory paid from a budget the caller presents. The kernel checks ownership
  * and balance; it decides no limit. Every refusal is XERR_NOMEM. rdx is cleared
@@ -277,12 +318,18 @@ static const XsysHandler g_xsys_table[XSYS_TABLE_SIZE] = {
     [XSYS_QUEUE_CLOSE]    = sys_queue_close,
     [XSYS_DERIVE]         = sys_derive,
     [XSYS_ALLOC_FROM]     = sys_alloc_from,
+    [XSYS_BUDGET_DERIVE]  = sys_budget_derive,
+    [XSYS_OFFER]          = sys_offer,
+    [XSYS_ACCEPT]         = sys_accept,
 };
 
 /* Every registered number must fit in the table. */
 typedef char xsys_table_fits[(XSYS_REQUEST_BLOCKS < XSYS_TABLE_SIZE) ? 1 : -1];
 typedef char xsys_derive_fits[(XSYS_DERIVE < XSYS_TABLE_SIZE) ? 1 : -1];
 typedef char xsys_alloc_from_fits[(XSYS_ALLOC_FROM < XSYS_TABLE_SIZE) ? 1 : -1];
+typedef char xsys_budget_fits[(XSYS_BUDGET_DERIVE < XSYS_TABLE_SIZE) ? 1 : -1];
+typedef char xsys_offer_fits[(XSYS_OFFER < XSYS_TABLE_SIZE) ? 1 : -1];
+typedef char xsys_accept_fits[(XSYS_ACCEPT < XSYS_TABLE_SIZE) ? 1 : -1];
 
 void xsys_resource(XAspace *as, ExcFrame *f) {
     UINT64 n = f->rax;

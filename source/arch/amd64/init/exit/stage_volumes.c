@@ -117,6 +117,7 @@ static void boot_shell_endpoint(UINT32 init_owner) {
     xk_println("[BOOT] shell endpoint ready");
 }
 
+static void exit_print_u(UINT64 v);
 static void boot_hand_budget(UINT32 boot_owner, UINT32 init_owner) {
     XToken b = XTOKEN_INVALID, got = XTOKEN_INVALID;
     if (xtok_budget_mint(boot_owner, BOOT_BUDGET_FRAMES, &b) != 0) {
@@ -128,7 +129,16 @@ static void boot_hand_budget(UINT32 boot_owner, UINT32 init_owner) {
         return;
     }
     g_exit_budget = got;
-    xk_println("[BOOT] budget -> init");
+    {
+        UINT64 bal = 0;
+        if (xtok_budget_balance(got, init_owner, &bal) == 0) {
+            xk_print("[BOOT] budget -> init, balance ");
+            exit_print_u(bal);
+            xk_println("");
+        } else {
+            xk_println("[BOOT] budget -> init, balance UNREADABLE");
+        }
+    }
 }
 
 /* Claims a disk root for the boot owner and hands it to init. The boot keeps
@@ -164,7 +174,28 @@ static void exit_print_u(UINT64 v) {
 
 /* Teardown. Not xproc_reap(init_owner): that would reclaim the roots themselves.
  * A root whose give fails stays with init_owner and is never reclaimed. */
+/* The shell accepts the budget exit offered through its SEND. Until the shell is
+ * a program (init.exb), the boot accepts for it: the RECV is the shell's own. */
+XToken g_shell_budget = XTOKEN_INVALID;
+
+static void boot_accept_shell_budget(void) {
+    XToken got = XTOKEN_INVALID;
+    UINT64 bal = 0;
+    if (g_shell_recv == XTOKEN_INVALID) return;
+    if (xtok_accept(g_shell_owner, g_shell_recv, &got) != 0) {
+        xk_println("[SHELL] no budget offered by exit");
+        return;
+    }
+    g_shell_budget = got;
+    if (xtok_budget_balance(got, g_shell_owner, &bal) == 0) {
+        xk_print("[SHELL] budget accepted, balance ");
+        exit_print_u(bal);
+        xk_println("");
+    }
+}
+
 static void exit_cleanup(UINT32 boot_owner, UINT32 init_owner) {
+    boot_accept_shell_budget();
     XToken keep[4] = { XTOKEN_INVALID, XTOKEN_INVALID, XTOKEN_INVALID, XTOKEN_INVALID };
     XToken list[64];
 
@@ -232,6 +263,7 @@ static void exit_launch(UINT32 boot_owner, UINT32 init_owner) {
         ctx.rdi = (UINT64)g_exit_root_rd0;
         ctx.rsi = (UINT64)g_exit_root_nd0;
         ctx.rdx = (UINT64)g_exit_budget;   /* exit does not spend it yet (S2) */
+        ctx.rcx = (UINT64)g_shell_send;   /* the shell's SEND, S2b */
         while ((st == XPROC_PREEMPT || st == XPROC_YIELD) && slices < EXIT_MAX_SLICES) {
             st = xproc_run_ctx(&as, &ctx, &r);
             slices++;

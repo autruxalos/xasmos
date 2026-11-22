@@ -193,6 +193,31 @@ static void p9_memory_is_paid_from_a_budget(void) {
     CHECK(owner_retire(o) == 0);
 }
 
+/* P10: a shell's share can be offered only through the shell's SEND, and only by
+ * the owner of the token. A program holding a budget and no SEND cannot give it
+ * away, and a RECV is not a SEND. */
+static void p10_offer_needs_the_send(void) {
+    UINT32 sh = owner_new(), in = owner_new(), pr = owner_new();
+    XToken rv = XTOKEN_INVALID, sd = XTOKEN_INVALID, b = XTOKEN_INVALID, c = XTOKEN_INVALID;
+    UINT64 bal = 0;
+    CHECK(xep_create(sh, &rv) == 0);
+    CHECK(xep_send_cap(sh, rv, in, &sd) == 0);
+    CHECK(xtok_budget_mint(in, 100, &b) == 0);
+    CHECK(xtok_budget_derive(in, b, 40, &c) == 0);
+    CHECK(xtok_offer(pr, c, sd) == -1);      /* a program without the SEND */
+    CHECK(xtok_offer(in, c, rv) == -1);      /* a RECV is not a SEND */
+    CHECK(xtok_offer(in, c, sd) == 0);
+    CHECK(xtok_cancel(in, c) == 0);
+    CHECK(xtok_release_owned(c, in) == 0);   /* the balance returns to b */
+    CHECK(xtok_budget_balance(b, in, &bal) == 0 && bal == 100);
+    CHECK(xtok_release_owned(sd, in) == 0);
+    CHECK(xep_destroy(sh, rv) == 0);
+    CHECK(xtok_release_owned(b, in) == 0);
+    CHECK(owner_retire(sh) == 0);
+    CHECK(owner_retire(in) == 0);
+    CHECK(owner_retire(pr) == 0);
+}
+
 int main(int argc, char **argv) {
     int strict = argc > 1 && strcmp(argv[1], "--strict") == 0;
     host_dev_init(&dev, 512, 1024);
@@ -208,6 +233,7 @@ int main(int argc, char **argv) {
     p6_delegated_token_serves_ring();
     p8_revocation_reaches_lineage();
     p9_memory_is_paid_from_a_budget();
+    p10_offer_needs_the_send();
     CHECK(xtok_live_count() == base);                /* P7: nothing leaked */
 
 #ifndef XTOK_HAS_RAM_DISK
