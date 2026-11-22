@@ -22,8 +22,7 @@ SRCS := \
         arch/amd64/kernel/xeret/xring_table.c \
         arch/amd64/kernel/xeret/mem/owner.c \
         arch/amd64/kernel/xeret/mem/derive_call.c \
-        arch/amd64/kernel/xeret/mem/derive_call.c \
-        arch/amd64/kernel/xeret/mem/derive_call.c \
+        arch/amd64/kernel/xeret/mem/endpoint.c \
         arch/amd64/kernel/xeret/xring_boot.c \
         arch/amd64/kernel/xeret/load_amd64.c \
         arch/amd64/kernel/xeret/mem/physical.c \

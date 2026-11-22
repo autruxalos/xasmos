@@ -107,6 +107,7 @@ int kr_device_submit(void *arg, uint32_t slot, const XqSqe *e) {
     UINT64 start = 0, phys = 0, frames = 0;
     BlkReq req;
     BlkDev *d;
+    int rc;
 
     if (xtok_blk_range(e->blk_token, &dev, &start) != 0) return -1;
     if (xtok_ram_info(e->ram_token, &phys, &frames) != 0) return -1;
@@ -122,7 +123,11 @@ int kr_device_submit(void *arg, uint32_t slot, const XqSqe *e) {
 
     if (d->ops && d->ops->submit) return d->ops->submit(d->ctx, &req);
 
-    /* No synchronous path: a device without submit cannot serve a ring entry.
-     * Refusing here keeps the kernel from copying program data itself. */
-    return -1;
+    /* Synchronous device: transfer now and complete inside this call. */
+    if (req.op == BLK_OP_WRITE)
+        rc = blk_write(d, req.lba, req.count, (const void *)(uintptr_t)phys);
+    else
+        rc = blk_read(d, req.lba, req.count, (void *)(uintptr_t)phys);
+    kr_complete(r, slot, rc);
+    return 0;
 }

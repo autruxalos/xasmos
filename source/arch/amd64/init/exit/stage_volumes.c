@@ -97,6 +97,25 @@ XToken g_exit_root_nd0 = XTOKEN_INVALID;
  * are charged when spent (XSYS_ALLOC_FROM), not here. */
 #define BOOT_BUDGET_FRAMES 16384u   /* 64 MiB, the boot volume's size */
 XToken g_exit_budget = XTOKEN_INVALID;
+/* Shell identity: a fixed, long-lived owner created by the boot. It is not
+ * RUN_OWNER, so the reap of a program can never reach the shell's tokens. */
+UINT32 g_shell_owner = 0;
+XToken g_shell_recv = XTOKEN_INVALID;   /* the shell accepts offers here */
+XToken g_shell_send = XTOKEN_INVALID;   /* minted for init_owner: init may offer */
+
+
+/* S2a: the shell's endpoint. The receiver (shell) opens it and mints the SEND
+ * for init_owner; no token moves, only the right to offer is issued. */
+static void boot_shell_endpoint(UINT32 init_owner) {
+    g_shell_owner = owner_new();
+    if (g_shell_owner == 0) { xk_println("[BOOT] shell owner FAILED"); return; }
+    if (xep_create(g_shell_owner, &g_shell_recv) != 0) { xk_println("[BOOT] shell endpoint FAILED"); return; }
+    if (xep_send_cap(g_shell_owner, g_shell_recv, init_owner, &g_shell_send) != 0) {
+        xk_println("[BOOT] shell send FAILED");
+        return;
+    }
+    xk_println("[BOOT] shell endpoint ready");
+}
 
 static void boot_hand_budget(UINT32 boot_owner, UINT32 init_owner) {
     XToken b = XTOKEN_INVALID, got = XTOKEN_INVALID;
@@ -146,7 +165,7 @@ static void exit_print_u(UINT64 v) {
 /* Teardown. Not xproc_reap(init_owner): that would reclaim the roots themselves.
  * A root whose give fails stays with init_owner and is never reclaimed. */
 static void exit_cleanup(UINT32 boot_owner, UINT32 init_owner) {
-    XToken keep[3] = { XTOKEN_INVALID, XTOKEN_INVALID, XTOKEN_INVALID };
+    XToken keep[4] = { XTOKEN_INVALID, XTOKEN_INVALID, XTOKEN_INVALID, XTOKEN_INVALID };
     XToken list[64];
 
     if (g_exit_root_rd0 != XTOKEN_INVALID &&
@@ -156,6 +175,7 @@ static void exit_cleanup(UINT32 boot_owner, UINT32 init_owner) {
         xtok_give(init_owner, g_exit_root_nd0, boot_owner) != 0)
         keep[1] = g_exit_root_nd0;
 
+    if (g_shell_send != XTOKEN_INVALID) keep[3] = g_shell_send;   /* the shell's right to be offered to */
     if (g_exit_budget != XTOKEN_INVALID &&
         xep_transfer(init_owner, g_exit_budget, boot_owner, 0) != 0)
         keep[2] = g_exit_budget;   /* never reclaimed: a budget is memory's balance */
@@ -165,15 +185,23 @@ static void exit_cleanup(UINT32 boot_owner, UINT32 init_owner) {
         UINT32 progress = 0;
         if (n == 0) break;
         for (UINT32 k = 0; k < n; k++) {
-            if (list[k] == keep[0] || list[k] == keep[1] || list[k] == keep[2]) continue;
+            if (list[k] == keep[0] || list[k] == keep[1] || list[k] == keep[2] || list[k] == keep[3]) continue;
             xas_revoke_token(list[k]);
             if (xtok_reclaim(list[k]) == 0) progress++;
         }
         if (progress == 0) break;
     }
 
-    if (owner_retire(init_owner) != 0)
-        xk_println("[EXIT] init owner still holds tokens: not retired");
+    /* init_owner is long-lived: it holds the SEND the shell is offered through
+     * (S2b). It is retired only when init.exb ends, never by exit. */
+    {
+        UINT64 f = 0;
+        UINT32 t = 0;
+        xtok_owner_usage(init_owner, &f, &t);
+        xk_print("[EXIT] init owner kept: ");
+        exit_print_u(t);
+        xk_println(" token(s), the shell SEND");
+    }
 }
 
 static void exit_launch(UINT32 boot_owner, UINT32 init_owner) {
@@ -307,6 +335,7 @@ int stage_volumes(void) {
         if (rd) g_exit_root_rd0 = boot_hand_root(rd, "rd0", boot_owner, init_owner);
         if (nd) g_exit_root_nd0 = boot_hand_root(nd, "nd0", boot_owner, init_owner);
         boot_hand_budget(boot_owner, init_owner);
+        boot_shell_endpoint(init_owner);
         exit_launch(boot_owner, init_owner);
     }
 
