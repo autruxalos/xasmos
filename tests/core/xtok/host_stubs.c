@@ -1,4 +1,5 @@
 /* Host replacements for what the kernel gets from physical memory and devices. */
+#include "capability.h"
 #include <stdlib.h>
 #include <string.h>
 #include "kmemory.h"
@@ -54,3 +55,7 @@ void host_dev_init(BlkDev *d, uint32_t ss, uint64_t sc) {
 }
 
 void host_dev_fail(int on) { g_fail = on; }
+
+/* Host stub: the address space is not built on the host. Revocation of
+ * mappings is a no-op here; token_ledger's own revocation still runs. */
+int xas_revoke_token(XToken tok) { (void)tok; return 0; }
