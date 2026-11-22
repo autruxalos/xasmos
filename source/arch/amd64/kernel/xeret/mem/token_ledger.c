@@ -76,6 +76,7 @@ void xtok_init(void) {
         g_table[i].phys       = 0;
         g_table[i].n_frames   = 0;
         g_table[i].map_count  = 0;
+        g_table[i].parent = XTOKEN_INVALID;
     }
     g_live      = 0;
     g_next_hint = 0;
@@ -195,13 +196,43 @@ int xtok_ram_info(XToken tok, UINT64 *out_phys, UINT64 *out_frames) {
 #define REL_CHECK_RIGHT  1u    /* holder-initiated: needs XTOK_RIGHT_RELEASE */
 #define REL_CHECK_OWNER  2u    /* the caller must be the token's owner      */
 
-/* One implementation for every way a token can die, so they cannot drift.
- * A foreign token reports ESTALE, exactly like a nonexistent one: a caller
- * must not be able to tell "not yours" from "does not exist". */
+/* The one place a token dies. Caller holds g_lock. Returns 1 and the frames to
+ * free if the entry held RAM; the caller frees them after unlocking. */
+static int retire_locked(XTokenEntry *e, UINT64 *phys, UINT64 *n) {
+    int freed = 0;
+    if (e->kind == XTOK_KIND_RAM && e->phys != 0 && e->n_frames != 0) {
+        *phys = e->phys;
+        *n    = e->n_frames;
+        freed = 1;
+    }
+    e->live      = 0;
+    e->kind      = XTOK_KIND_NONE;
+    e->owner_id  = 0;
+    e->rights    = 0;
+    e->phys      = 0;
+    e->n_frames  = 0;
+    e->map_count = 0;
+    e->dev       = 0;
+    e->start     = 0;
+    e->io_count  = 0;
+    e->hold      = 0;
+    e->frozen    = 0;
+    e->parent    = XTOKEN_INVALID;
+    e->generation++;
+    if (e->generation == 0) {
+        e->generation = 1;
+    }
+    if (g_live > 0) {
+        g_live--;
+    }
+    return freed;
+}
+
+/* A foreign token reports ESTALE, exactly like a nonexistent one. */
 static int release_impl(XToken tok, UINT32 flags, UINT32 owner) {
     XTokenEntry *e;
     UINT64 phys = 0, n = 0;
-    int rc;
+    int rc = 0, freed = 0;
 
     xspin_lock(&g_lock);
     e = lookup_live(tok);
@@ -212,43 +243,80 @@ static int release_impl(XToken tok, UINT32 flags, UINT32 owner) {
     } else if ((flags & REL_CHECK_RIGHT) && (e->rights & XTOK_RIGHT_RELEASE) == 0) {
         rc = XTOK_REL_ERIGHTS;
     } else if (e->map_count != 0 || e->io_count != 0 || e->hold != 0 || e->frozen != 0) {
-        rc = XTOK_REL_EBUSY;   /* still mapped or in device I/O */
+        rc = XTOK_REL_EBUSY;
     } else {
-        phys = e->phys;
-        n    = e->n_frames;
-        int was_ram = (e->kind == XTOK_KIND_RAM && phys != 0 && n != 0);
-
-        e->live      = 0;
-        e->kind      = XTOK_KIND_NONE;
-        e->owner_id  = 0;
-        e->rights    = 0;
-        e->phys      = 0;
-        e->n_frames  = 0;
-        e->map_count = 0;
-        e->dev       = 0;
-        e->start     = 0;
-        e->io_count  = 0;
-        e->hold     = 0;
-        e->frozen = 0;
-        /* Bump generation so old tokens pointing at this slot fail lookup */
-        e->generation++;
-        if (e->generation == 0) {
-            e->generation = 1;
-        }
-        if (g_live > 0) {
-            g_live--;
-        }
-        rc = was_ram ? 1 : 0;   /* 1 signals "free phys/n after unlocking" */
+        freed = retire_locked(e, &phys, &n);
     }
     xspin_unlock(&g_lock);
 
-    /* phys_free_frames() takes physical.c's own lock -- must not be called
-     * while holding g_lock, or a symmetric call elsewhere could deadlock
-     * the two structures against each other. */
-    if (rc == 1) {
+    /* phys_free_frames takes physical.c's lock: never while holding g_lock. */
+    if (freed) {
         phys_free_frames(phys, n);
     }
-    return (rc < 0) ? rc : 0;
+    return rc;
+}
+
+#define XTOK_REVOKE_MAX 32u
+
+/* Revocation: the subtree of tok is retired as one step. Membership follows
+ * parent links, so it reaches delegated descendants whatever their rights.
+ * Refused, with nothing changed, if any member is mapped, in I/O, retained or
+ * frozen. The root holder needs RELEASE; children do not. */
+int xtok_revoke(XToken tok, UINT32 owner) {
+    XToken mem[XTOK_REVOKE_MAX];
+    UINT64 fp[XTOK_REVOKE_MAX], fn[XTOK_REVOKE_MAX];
+    UINT32 nm = 0, nf = 0, slot, gen, i, j;
+    XTokenEntry *root, *e;
+    int rc = 0, grew;
+
+    xspin_lock(&g_lock);
+    root = lookup_live(tok);
+    if (!root || root->owner_id != owner) { rc = XTOK_REL_ESTALE; goto out; }
+    if ((root->rights & XTOK_RIGHT_RELEASE) == 0) { rc = XTOK_REL_ERIGHTS; goto out; }
+
+    mem[nm++] = tok;
+    do {
+        grew = 0;
+        for (slot = 0; slot < XTOK_TABLE_SLOTS; slot++) {
+            XToken t;
+            e = &g_table[slot];
+            if (!e->live || e->parent == XTOKEN_INVALID) continue;
+            for (i = 0; i < nm; i++) if (mem[i] == e->parent) break;
+            if (i == nm) continue;                  /* parent is not in the subtree */
+            t = pack_token(slot, e->generation);
+            for (j = 0; j < nm; j++) if (mem[j] == t) break;
+            if (j < nm) continue;                   /* already a member */
+            if (nm >= XTOK_REVOKE_MAX) { rc = XTOK_REL_ETOOBIG; goto out; }
+            mem[nm++] = t;
+            grew = 1;
+        }
+    } while (grew);
+
+    for (i = 0; i < nm; i++) {
+        unpack_token(mem[i], &slot, &gen);
+        e = &g_table[slot];
+        if (e->map_count != 0 || e->io_count != 0 || e->hold != 0 || e->frozen != 0) {
+            rc = XTOK_REL_EBUSY;
+            goto out;
+        }
+    }
+
+    for (i = 0; i < nm; i++) {
+        UINT64 p = 0, n = 0;
+        unpack_token(mem[i], &slot, &gen);
+        if (retire_locked(&g_table[slot], &p, &n)) {
+            fp[nf] = p;
+            fn[nf] = n;
+            nf++;
+        }
+    }
+
+out:
+    xspin_unlock(&g_lock);
+    for (i = 0; i < nf; i++) {
+        phys_free_frames(fp[i], fn[i]);
+    }
+    return rc;
 }
 
 /* Kernel-side release by anyone holding the right (the original behaviour:
@@ -702,6 +770,7 @@ XToken xtok_derive_blocks(UINT32 owner, XToken parent, UINT64 first, UINT64 coun
     e->n_frames = count;
     e->dev      = p->dev;
     e->start    = p->start + first;
+    e->parent   = parent;
     e->io_count = 0;
     e->hold     = 0;
     e->frozen = 0;
@@ -820,4 +889,28 @@ int xtok_thaw(XToken tok) {
     }
     xspin_unlock(&g_lock);
     return rc;
+}
+
+/* Read-only snapshot of the live entries, for tests/arch/amd64 invariants. */
+UINT32 xtok_inspect_all(XTokenView *out, UINT32 max) {
+    UINT32 slot, n = 0;
+    xspin_lock(&g_lock);
+    for (slot = 0; slot < XTOK_TABLE_SLOTS && n < max; slot++) {
+        XTokenEntry *e = &g_table[slot];
+        if (!e->live) continue;
+        out[n].tok    = pack_token(slot, e->generation);
+        out[n].kind   = e->kind;
+        out[n].owner  = e->owner_id;
+        out[n].rights = e->rights;
+        out[n].start  = e->start;
+        out[n].count  = e->n_frames;
+        out[n].frozen = e->frozen;
+        out[n].hold   = e->hold;
+        out[n].io_count = e->io_count;
+        out[n].map_count = e->map_count;
+        out[n].parent = e->parent;
+        n++;
+    }
+    xspin_unlock(&g_lock);
+    return n;
 }

@@ -8,21 +8,6 @@
 #define EXO_MAX 512u
 static XTokenView g_view[EXO_MAX];
 
-/* Parent links kept by the test. The kernel records no parents yet (F1). */
-typedef struct { XToken child; XToken parent; } ExoLink;
-#define EXO_LINKS 512u
-static ExoLink g_link[EXO_LINKS];
-static UINT32  g_nlink;
-
-void exo_link_reset(void) { g_nlink = 0; }
-int  exo_link_add(XToken child, XToken parent) {
-    if (g_nlink >= EXO_LINKS) return -1;
-    g_link[g_nlink].child = child;
-    g_link[g_nlink].parent = parent;
-    g_nlink++;
-    return 0;
-}
-
 static const XTokenView *find(UINT32 n, XToken t) {
     for (UINT32 i = 0; i < n; i++) if (g_view[i].tok == t) return &g_view[i];
     return 0;
@@ -54,14 +39,16 @@ int exo_check_state(void) {
         if (v->frozen && (v->io_count != 0 || v->map_count != 0)) return EXO_I3_FROZEN_USED;
     }
 
-    /* I2: every recorded child fits its parent in range and rights. */
-    for (UINT32 l = 0; l < g_nlink; l++) {
-        const XTokenView *c = find(n, g_link[l].child);
-        const XTokenView *p = find(n, g_link[l].parent);
-        if (!c || !p) continue;            /* released: nothing to check */
-        if (c->rights & ~p->rights) return EXO_I2_CHILD_WIDER;
-        if (c->start < p->start) return EXO_I2_CHILD_WIDER;
-        if (c->start - p->start + c->count > p->count) return EXO_I2_CHILD_WIDER;
+    /* I2: a live child fits its live parent in range and rights. A released
+     * parent leaves its children valid; they simply have no live parent. */
+    for (UINT32 i = 0; i < n; i++) {
+        const XTokenView *c = &g_view[i];
+        if (c->parent == XTOKEN_INVALID || c->kind != XTOK_KIND_BLOCKS) continue;
+        const XTokenView *p2 = find(n, c->parent);
+        if (!p2 || p2->kind != XTOK_KIND_BLOCKS) continue;
+        if (c->rights & ~p2->rights) return EXO_I2_CHILD_WIDER;
+        if (c->start < p2->start) return EXO_I2_CHILD_WIDER;
+        if (c->start - p2->start + c->count > p2->count) return EXO_I2_CHILD_WIDER;
     }
 
     /* I4: a token id appears at most once in the snapshot. */

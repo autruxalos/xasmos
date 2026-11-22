@@ -79,7 +79,6 @@ static void op_derive(ExoRng *r) {
     XToken c = XTOKEN_INVALID;
     if (xsys_derive(o, parent, f, n, rights, &c) == XDERIVE_OK) {
         pool_add(c, o, KIND_BLK);
-        exo_link_add(c, parent);
     }
 }
 
@@ -160,7 +159,6 @@ int main(int argc, char **argv) {
     for (cur_seed = 1; cur_seed <= seeds && !violated; cur_seed++) {
         ExoRng rng;
         exo_seed(&rng, (uint64_t)cur_seed * 2654435761u + 1u);
-        exo_link_reset();
         npool = 0;
         for (UINT32 o = 0; o < NOWN; o++) owners[o] = owner_new();
 

@@ -83,6 +83,7 @@ typedef struct {
     UINT32  io_count;    /* BLOCKS only: device operations in flight */
     UINT32  hold;        /* kernel-owned retention: blocks release, not mapping */
     UINT32  frozen;      /* offered for transfer: no use, release or map until accept/cancel */
+    XToken  parent;      /* derivation parent, XTOKEN_INVALID for roots */
 } XTokenEntry;
 
 #define XTOK_TABLE_SLOTS  4096u
@@ -118,6 +119,7 @@ UINT32 xtok_live_count(void);
 #define XTOK_REL_ESTALE   (-1)
 #define XTOK_REL_EBUSY    (-2)   /* still mapped */
 #define XTOK_REL_ERIGHTS  (-3)   /* owner's token, but without RELEASE */
+#define XTOK_REL_ETOOBIG  (-4)   /* revocation subtree larger than XTOK_REVOKE_MAX */
 
 /* Holder-initiated free: requires ownership AND the RELEASE right. */
 int    xtok_release_owned(XToken tok, UINT32 owner);
@@ -189,5 +191,27 @@ int    xtok_ep_value(XToken tok, UINT32 owner, UINT32 right, UINT64 *value);
 int    xtok_offer_begin(UINT32 giver, XToken tok);
 int    xtok_thaw_to(XToken tok, UINT32 owner);
 int    xtok_thaw(XToken tok);
+
+/* Read-only inspection, for the exokernel invariant checks (tests/arch/amd64).
+ * Returns the number of live slots visited. Never changes state. */
+typedef struct {
+    XToken  tok;
+    UINT32  kind;
+    UINT32  owner;
+    UINT32  rights;
+    UINT64  start;
+    UINT64  count;       /* n_frames for RAM, block count for BLOCKS */
+    UINT32  frozen;
+    UINT32  hold;
+    UINT32  io_count;
+    UINT16  map_count;
+    XToken  parent;      /* derivation parent, XTOKEN_INVALID if none */
+} XTokenView;
+
+UINT32 xtok_inspect_all(XTokenView *out, UINT32 max);
+
+/* Revocation: retires tok and every descendant reached by parent links, as one
+ * step. Refused, with nothing changed, if any member is busy. */
+int xtok_revoke(XToken tok, UINT32 owner);
 
 #endif /* XASMOS_CAPABILITY_H */

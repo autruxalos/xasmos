@@ -37,7 +37,5 @@ const char *exo_invariant_name(int code);
  * invariant. Reads the ledger only through its public inspection calls. */
 int exo_check_state(void);
 
-void exo_link_reset(void);
-int  exo_link_add(XToken child, XToken parent);
 
 #endif
