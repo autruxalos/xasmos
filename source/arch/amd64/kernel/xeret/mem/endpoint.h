@@ -19,4 +19,8 @@ int xtok_offer(UINT32 giver, XToken tok, XToken ep_send);
 int xtok_accept(UINT32 recv_owner, XToken ep_recv, XToken *out);
 int xtok_cancel(UINT32 giver, XToken tok);
 
+/* Full transfer in one call: the receiver opens an endpoint, the giver sends
+ * a SEND to it and offers, the receiver accepts. The only way titularity moves. */
+int xep_transfer(UINT32 from, XToken t, UINT32 to, XToken *got);
+
 #endif

@@ -114,3 +114,17 @@ int xtok_cancel(UINT32 giver, XToken tok) {
     }
     return -1;
 }
+
+
+int xep_transfer(UINT32 from, XToken t, UINT32 to, XToken *got) {
+    XToken er = XTOKEN_INVALID, es = XTOKEN_INVALID;
+    int rc = -1;
+    if (got) *got = XTOKEN_INVALID;
+    if (xep_create(to, &er) != 0) return -1;
+    if (xep_send_cap(to, er, from, &es) == 0) {
+        if (xtok_offer(from, t, es) == 0) rc = xtok_accept(to, er, got);
+        xtok_release_owned(es, from);
+    }
+    xep_destroy(to, er);
+    return rc;
+}

@@ -9,6 +9,14 @@
  * range the allocator reserved. If it does not, the volume could be handed
  * out as page tables, so the stage fails.
  ******************************************************************************/
+#include "exit_prog_exb.h"
+#include "capability.h"
+#include "xload.h"
+#include "xproc.h"
+#include "paging.h"
+#include "mem/owner.h"
+#include "mem/budget.h"
+#include "mem/endpoint.h"
 #include "exfs.h"
 #include "dev.h"
 #include "ramdisk.h"
@@ -85,6 +93,25 @@ int  nvme_route_bind(uint32_t ring, void (*fn)(void *arg, uint32_t slot, int32_t
 XToken g_exit_root_rd0 = XTOKEN_INVALID;
 XToken g_exit_root_nd0 = XTOKEN_INVALID;
 
+/* Boot budget: the balance of memory the boot may hand out. The frames it names
+ * are charged when spent (XSYS_ALLOC_FROM), not here. */
+#define BOOT_BUDGET_FRAMES 16384u   /* 64 MiB, the boot volume's size */
+XToken g_exit_budget = XTOKEN_INVALID;
+
+static void boot_hand_budget(UINT32 boot_owner, UINT32 init_owner) {
+    XToken b = XTOKEN_INVALID, got = XTOKEN_INVALID;
+    if (xtok_budget_mint(boot_owner, BOOT_BUDGET_FRAMES, &b) != 0) {
+        xk_println("[BOOT] budget mint FAILED");
+        return;
+    }
+    if (xep_transfer(boot_owner, b, init_owner, &got) != 0) {
+        xk_println("[BOOT] budget give FAILED");
+        return;
+    }
+    g_exit_budget = got;
+    xk_println("[BOOT] budget -> init");
+}
+
 /* Claims a disk root for the boot owner and hands it to init. The boot keeps
  * nothing: the give moves the token, it does not copy it. Returns the handle. */
 static XToken boot_hand_root(BlkDev *d, const char *name, UINT32 boot_owner, UINT32 init_owner) {
@@ -101,6 +128,101 @@ static XToken boot_hand_root(BlkDev *d, const char *name, UINT32 boot_owner, UIN
     }
     xk_println(" -> init");
     return t;
+}
+
+/* exit.exb: the first program. The boot always runs it, with init_owner and the
+ * two disk roots in rdi and rsi. Its result is printed and the shell continues
+ * whatever it returns. init_owner is the owner of the handoff, not a permanent
+ * one: the roots go back to boot_owner, and init_owner is retired empty. */
+#define EXIT_MAX_SLICES 1000
+
+static void exit_print_u(UINT64 v) {
+    char buf[21];
+    int n = 0;
+    do { buf[n++] = (char)('0' + (v % 10)); v /= 10; } while (v && n < 20);
+    while (n) { char c[2] = { buf[--n], 0 }; xk_print(c); }
+}
+
+/* Teardown. Not xproc_reap(init_owner): that would reclaim the roots themselves.
+ * A root whose give fails stays with init_owner and is never reclaimed. */
+static void exit_cleanup(UINT32 boot_owner, UINT32 init_owner) {
+    XToken keep[3] = { XTOKEN_INVALID, XTOKEN_INVALID, XTOKEN_INVALID };
+    XToken list[64];
+
+    if (g_exit_root_rd0 != XTOKEN_INVALID &&
+        xtok_give(init_owner, g_exit_root_rd0, boot_owner) != 0)
+        keep[0] = g_exit_root_rd0;
+    if (g_exit_root_nd0 != XTOKEN_INVALID &&
+        xtok_give(init_owner, g_exit_root_nd0, boot_owner) != 0)
+        keep[1] = g_exit_root_nd0;
+
+    if (g_exit_budget != XTOKEN_INVALID &&
+        xep_transfer(init_owner, g_exit_budget, boot_owner, 0) != 0)
+        keep[2] = g_exit_budget;   /* never reclaimed: a budget is memory's balance */
+
+    for (;;) {
+        UINT32 n = xtok_owner_tokens(init_owner, list, 64);
+        UINT32 progress = 0;
+        if (n == 0) break;
+        for (UINT32 k = 0; k < n; k++) {
+            if (list[k] == keep[0] || list[k] == keep[1] || list[k] == keep[2]) continue;
+            xas_revoke_token(list[k]);
+            if (xtok_reclaim(list[k]) == 0) progress++;
+        }
+        if (progress == 0) break;
+    }
+
+    if (owner_retire(init_owner) != 0)
+        xk_println("[EXIT] init owner still holds tokens: not retired");
+}
+
+static void exit_launch(UINT32 boot_owner, UINT32 init_owner) {
+    XAspace as;
+    XLoadResult res;
+    XContext ctx;
+    XProcResult r;
+    int lrc = XLOAD_OK;
+    int st = XPROC_PREEMPT;
+    unsigned slices = 0;
+
+    r.reason = -1;
+    r.exit_code = 0;
+
+    if (xas_create(&as, init_owner) != XAS_OK) {
+        xk_println("[EXIT] exit: no address space");
+        exit_cleanup(boot_owner, init_owner);
+        return;
+    }
+
+    lrc = xload_exb(&as, init_owner, exit_prog_exb, exit_prog_exb_len, &res);
+    if (lrc != XLOAD_OK) {
+        xk_print("[EXIT] exit: load failed, code ");
+        exit_print_u((UINT64)(-lrc));
+        xk_println("");
+    } else {
+        xctx_init(&ctx, res.entry, res.stack_top);
+        ctx.rdi = (UINT64)g_exit_root_rd0;
+        ctx.rsi = (UINT64)g_exit_root_nd0;
+        ctx.rdx = (UINT64)g_exit_budget;   /* exit does not spend it yet (S2) */
+        while ((st == XPROC_PREEMPT || st == XPROC_YIELD) && slices < EXIT_MAX_SLICES) {
+            st = xproc_run_ctx(&as, &ctx, &r);
+            slices++;
+        }
+        if (st == XPROC_EXIT) {
+            xk_print("[EXIT] exit: code ");
+            exit_print_u(r.exit_code);
+            xk_println("");
+        } else {
+            xk_print("[EXIT] exit: did not finish, reason ");
+            exit_print_u((UINT64)r.reason);
+            xk_print(" slices ");
+            exit_print_u(slices);
+            xk_println("");
+        }
+    }
+
+    xas_destroy(&as);
+    exit_cleanup(boot_owner, init_owner);
 }
 
 int stage_volumes(void) {
@@ -184,6 +306,8 @@ int stage_volumes(void) {
         if (nd) xtok_root_mint(nd, boot_owner);
         if (rd) g_exit_root_rd0 = boot_hand_root(rd, "rd0", boot_owner, init_owner);
         if (nd) g_exit_root_nd0 = boot_hand_root(nd, "nd0", boot_owner, init_owner);
+        boot_hand_budget(boot_owner, init_owner);
+        exit_launch(boot_owner, init_owner);
     }
 
     /* Program ring table: the boot sets the policy, programs never do.
