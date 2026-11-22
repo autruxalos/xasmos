@@ -11,10 +11,12 @@ UINT64 phys_alloc_frames(UINT64 n) {
     return (UINT64)(uintptr_t)p;
 }
 
+static UINT64 g_phys_freed;
 void phys_free_frames(UINT64 addr, UINT64 n) {
-    (void)n;
+    g_phys_freed += n;
     free((void *)(uintptr_t)addr);
 }
+UINT64 host_phys_freed(void) { return g_phys_freed; }
 
 UINT64 phys_alloc_huge(void) { return phys_alloc_frames(512); }
 

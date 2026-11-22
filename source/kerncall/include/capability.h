@@ -14,6 +14,7 @@
 #define XTOK_KIND_BLOCKS 4u   /* a range of blocks on a registered block device */
 #define XTOK_KIND_ENDPOINT 5u /* receiver-owned transfer point (mem/endpoint.c) */
 #define XTOK_KIND_BUDGET   6u   /* memory budget: n_frames is the balance (mem/budget.h) */
+#define XTOK_KIND_MEM      7u   /* fixed frames (e.g. rd0): never returned to the allocator, never released */
 
 #define XTOK_RIGHT_READ    (1u << 0)
 #define XTOK_RIGHT_WRITE   (1u << 1)
@@ -214,5 +215,15 @@ UINT32 xtok_inspect_all(XTokenView *out, UINT32 max);
 /* Revocation: retires tok and every descendant reached by parent links, as one
  * step. Refused, with nothing changed, if any member is busy. */
 int xtok_revoke(XToken tok, UINT32 owner);
+
+/* Memory-backed fixed frames (rd0). Wraps frames that already exist; the
+ * ledger never returns them to the physical allocator. */
+int    xtok_mem_wrap(UINT32 owner, UINT64 phys, UINT64 n_frames, XToken *out);
+UINT64 xtok_mem_free_count(void);
+
+/* Fixed memory from a list of frames (volume of the boot). Frames need not be
+ * contiguous. xtok_frame_at walks them; map_acquire gives no contiguous range. */
+int    xtok_mem_wrap_list(UINT32 owner, const UINT64 *frames, UINT64 n, XToken *out);
+int    xtok_frame_at(XToken tok, UINT64 i, UINT64 *phys);
 
 #endif /* XASMOS_CAPABILITY_H */

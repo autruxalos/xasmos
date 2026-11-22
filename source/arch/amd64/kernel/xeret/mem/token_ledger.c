@@ -257,6 +257,8 @@ static int release_impl(XToken tok, UINT32 flags, UINT32 owner) {
         rc = XTOK_REL_ESTALE;
     } else if ((flags & REL_CHECK_OWNER) && e->owner_id != owner) {
         rc = XTOK_REL_ESTALE;
+    } else if (e->kind == XTOK_KIND_MEM) {
+        rc = XTOK_REL_ERIGHTS;   /* fixed frames have no release path */
     } else if ((flags & REL_CHECK_RIGHT) && (e->rights & XTOK_RIGHT_RELEASE) == 0) {
         rc = XTOK_REL_ERIGHTS;
     } else if (e->map_count != 0 || e->io_count != 0 || e->hold != 0 || e->frozen != 0) {
@@ -291,6 +293,7 @@ int xtok_revoke(XToken tok, UINT32 owner) {
     xspin_lock(&g_lock);
     root = lookup_live(tok);
     if (!root || root->owner_id != owner) { rc = XTOK_REL_ESTALE; goto out; }
+    if (root->kind == XTOK_KIND_MEM) { rc = XTOK_REL_ERIGHTS; goto out; }
     if ((root->rights & XTOK_RIGHT_RELEASE) == 0) { rc = XTOK_REL_ERIGHTS; goto out; }
 
     mem[nm++] = tok;
@@ -314,6 +317,7 @@ int xtok_revoke(XToken tok, UINT32 owner) {
     for (i = 0; i < nm; i++) {
         unpack_token(mem[i], &slot, &gen);
         e = &g_table[slot];
+        if (e->kind == XTOK_KIND_MEM) { rc = XTOK_REL_ERIGHTS; goto out; }
         if (e->map_count != 0 || e->io_count != 0 || e->hold != 0 || e->frozen != 0) {
             rc = XTOK_REL_EBUSY;
             goto out;
@@ -398,7 +402,7 @@ int xtok_map_acquire(XToken tok, UINT32 caller_owner, UINT32 rights_needed,
     xspin_lock(&g_lock);
     e = lookup_live(tok);
     if (!e)                                          rc = XTOK_MAP_ESTALE;
-    else if (e->kind != XTOK_KIND_RAM)               rc = XTOK_MAP_EKIND;
+    else if (e->kind != XTOK_KIND_RAM && e->kind != XTOK_KIND_MEM) rc = XTOK_MAP_EKIND;
     else if (e->owner_id != caller_owner)            rc = XTOK_MAP_EOWNER;
     else if ((e->rights & rights_needed) != rights_needed) rc = XTOK_MAP_ERIGHTS;
     else if (e->io_count != 0)                       rc = XTOK_MAP_EBUSY;
@@ -406,7 +410,7 @@ int xtok_map_acquire(XToken tok, UINT32 caller_owner, UINT32 rights_needed,
     else if (e->map_count == 0xFFFFu)                rc = XTOK_MAP_EBUSY;
     else {
         e->map_count++;
-        if (out_phys)   *out_phys   = e->phys;
+        if (out_phys)   *out_phys   = (e->kind == XTOK_KIND_MEM) ? 0 : e->phys;
         if (out_frames) *out_frames = e->n_frames;
         rc = XTOK_MAP_OK;
     }
@@ -1044,4 +1048,100 @@ int xtok_alloc_ram_from(UINT32 owner, XToken bud, UINT64 frames, UINT32 rights, 
     }
     if (out) *out = t;
     return 0;
+}
+
+/* ---- Fixed memory tokens (rd0) ------------------------------------------- */
+static UINT64 g_mem_free_count;   /* frames ever handed back for MEM tokens: must stay 0 */
+
+int xtok_mem_wrap(UINT32 owner, UINT64 phys, UINT64 n_frames, XToken *out) {
+    UINT32 slot;
+    XTokenEntry *e;
+    XToken t = XTOKEN_INVALID;
+    if (out) *out = XTOKEN_INVALID;
+    if (phys == 0 || n_frames == 0) return -1;
+    xspin_lock(&g_lock);
+    if (claim_slot(&slot) == 0) {
+        e = &g_table[slot];
+        e->kind      = XTOK_KIND_MEM;
+        e->owner_id  = owner;
+        e->rights    = XTOK_RIGHT_READ | XTOK_RIGHT_WRITE | XTOK_RIGHT_MAP | XTOK_RIGHT_GIVE;
+        e->phys      = phys;
+        e->n_frames  = n_frames;
+        e->dev       = 0;
+        e->start     = 0;
+        e->io_count  = 0;
+        e->map_count = 0;
+        e->hold      = 0;
+        e->frozen    = 0;
+        e->parent    = XTOKEN_INVALID;
+        e->live      = 1;
+        g_live++;
+        t = pack_token(slot, e->generation);
+    }
+    xspin_unlock(&g_lock);
+    if (t == XTOKEN_INVALID) return -1;
+    if (out) *out = t;
+    return 0;
+}
+
+UINT64 xtok_mem_free_count(void) { return g_mem_free_count; }
+
+/* ---- Fixed memory from a frame list (MEM, see capability.h) ---------------
+ * Permanent for the boot: the table is only appended to, and MEM tokens never
+ * return frames to the allocator. */
+#define XTOK_MEM_FRAME_MAX 16384u
+static UINT64 g_mem_frames[XTOK_MEM_FRAME_MAX];
+static UINT32 g_mem_used;
+
+int xtok_mem_wrap_list(UINT32 owner, const UINT64 *frames, UINT64 n, XToken *out) {
+    UINT32 slot;
+    XTokenEntry *e;
+    XToken t = XTOKEN_INVALID;
+    UINT64 i;
+    if (out) *out = XTOKEN_INVALID;
+    if (!frames || n == 0 || n > XTOK_MEM_FRAME_MAX) return -1;
+    xspin_lock(&g_lock);
+    if (g_mem_used + n <= XTOK_MEM_FRAME_MAX && claim_slot(&slot) == 0) {
+        for (i = 0; i < n; i++) g_mem_frames[g_mem_used + i] = frames[i];
+        e = &g_table[slot];
+        e->kind      = XTOK_KIND_MEM;
+        e->owner_id  = owner;
+        e->rights    = XTOK_RIGHT_READ | XTOK_RIGHT_WRITE | XTOK_RIGHT_MAP | XTOK_RIGHT_GIVE;
+        e->phys      = 0;
+        e->n_frames  = n;
+        e->start     = g_mem_used;
+        e->dev       = 0;
+        e->io_count  = 0;
+        e->map_count = 0;
+        e->hold      = 0;
+        e->frozen    = 0;
+        e->parent    = XTOKEN_INVALID;
+        e->live      = 1;
+        g_live++;
+        g_mem_used  += (UINT32)n;
+        t = pack_token(slot, e->generation);
+    }
+    xspin_unlock(&g_lock);
+    if (t == XTOKEN_INVALID) return -1;
+    if (out) *out = t;
+    return 0;
+}
+
+int xtok_frame_at(XToken tok, UINT64 i, UINT64 *phys) {
+    XTokenEntry *e;
+    int rc = -1;
+    if (!phys) return -1;
+    xspin_lock(&g_lock);
+    e = lookup_live(tok);
+    if (e && i < e->n_frames) {
+        if (e->kind == XTOK_KIND_MEM) {
+            *phys = g_mem_frames[e->start + i];
+            rc = 0;
+        } else if (e->kind == XTOK_KIND_RAM) {
+            *phys = e->phys + i * 4096u;
+            rc = 0;
+        }
+    }
+    xspin_unlock(&g_lock);
+    return rc;
 }
