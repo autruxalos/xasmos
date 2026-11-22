@@ -283,7 +283,9 @@ void xtok_owner_usage(UINT32 owner, UINT64 *frames, UINT32 *tokens) {
     xspin_lock(&g_lock);
     for (UINT32 slot = 0; slot < XTOK_TABLE_SLOTS; slot++) {
         if (g_table[slot].live && g_table[slot].owner_id == owner) {
-            f += g_table[slot].n_frames;
+            /* Memory quota: only RAM tokens hold frames. A block token names
+             * blocks of a device; it counts as one token and no frames. */
+            if (g_table[slot].kind == XTOK_KIND_RAM) f += g_table[slot].n_frames;
             c++;
         }
     }

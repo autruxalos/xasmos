@@ -88,6 +88,19 @@ static void test_ring_held_token_refused(void) {
     CHECK(owner_retire(b) == 0);
 }
 
+/* A block token over a whole disk is not memory: it counts as one token, and
+ * no frames of the memory quota. */
+static void test_block_token_uses_no_frame_quota(void) {
+    UINT32 a = owner_new();
+    XToken big = xtok_alloc_blocks(a, &dev, 0, 131072, XTOK_RIGHT_READ | XTOK_RIGHT_RELEASE);
+    UINT64 f = 0; UINT32 t = 0;
+    CHECK(big != XTOKEN_INVALID);
+    xtok_owner_usage(a, &f, &t);
+    CHECK(f == 0 && t == 1);
+    CHECK(xtok_release(big) == 0);
+    CHECK(owner_retire(a) == 0);
+}
+
 int main(void) {
     host_dev_init(&dev, 512, 1024);
     xtok_init();
@@ -98,6 +111,7 @@ int main(void) {
     test_transfer_moves_authority();
     test_rights_and_range_unchanged();
     test_ring_held_token_refused();
+    test_block_token_uses_no_frame_quota();
     printf("give: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }
