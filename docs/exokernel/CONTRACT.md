@@ -44,3 +44,14 @@ Un hijo sin RELEASE se recupera revocando a su padre.
 ## Deudas declaradas
 - Mediación de DMA sin IOMMU (hasta AM5 con IOMMU).
 - Consola de diagnóstico del arranque en serie, hasta que exista la capacidad.
+
+## Transferencia de titularidad (v1)
+- Un endpoint es un objeto que posee su receptor. Se crea con dos capacidades
+  sobre él: RECV (para aceptar, la conserva el receptor) y SEND (para ofrecer,
+  la atenúa y la entrega a quien quiera enviarle).
+- Ofrecer (offer): el dador presenta un token suyo con GIVE y una SEND. El token
+  queda congelado en el slot pendiente del endpoint. No cambia de dueño.
+- Aceptar (accept): el receptor presenta su RECV. El token pasa a su dueño.
+- Cancelar (cancel): el dador retira la oferta; el token se descongela.
+- Un slot pendiente por endpoint. Destruir el endpoint cancela la oferta.
+- No existe transferencia unilateral. xtok_give queda retirado.
