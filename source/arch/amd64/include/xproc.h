@@ -29,6 +29,7 @@
 #define XSYS_QUEUE_RING   11u  /* rdi=token -> rax=entries processed (a hint)    */
 #define XSYS_QUEUE_CLOSE  12u  /* rdi=token -> rax=0; released once drained      */
 #define XSYS_DERIVE      13u  /* rdi=parent rsi=first rdx=count rcx=rights -> rdx=child, rax=0 or XERR_* */
+#define XSYS_ALLOC_FROM  14u  /* rdi=budget rsi=frames rdx=rights -> rdx=token, rax=0 or XERR_* */
 
 /* Size of the resource dispatch table. Every XSYS_* above must be below it:
  * the static assert in sys.c fails the build otherwise. */

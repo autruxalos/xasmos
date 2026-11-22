@@ -10,6 +10,7 @@
 #include "owner.h"
 #include "endpoint.h"
 #include "derive_call.h"
+#include "budget.h"
 #include "host_stubs.h"
 
 static int checks, failures, pending;
@@ -156,6 +157,42 @@ static void p6_delegated_token_serves_ring(void) {
     CHECK(owner_retire(r) == 0);
 }
 
+/* P8: revocation reaches the whole lineage. A child delegated to another owner,
+ * without RELEASE, dies with its root, and no one can use it afterwards. */
+static void p8_revocation_reaches_lineage(void) {
+    UINT32 a = owner_new(), b = owner_new();
+    XToken root = xtok_alloc_blocks(a, &dev, 0, 64, GIVEABLE), c = XTOKEN_INVALID, got = XTOKEN_INVALID;
+    CHECK(root != XTOKEN_INVALID);
+    CHECK(xsys_derive(a, root, 0, 8, XTOK_RIGHT_READ | XTOK_RIGHT_GIVE, &c) == XDERIVE_OK);
+    CHECK(transfer(a, c, b, &got) == 0 && got == c);
+    CHECK(xtok_revoke(root, a) == 0);
+    CHECK(xtok_release_owned(c, b) == XTOK_REL_ESTALE);
+    CHECK(xtok_release_owned(root, a) == XTOK_REL_ESTALE);
+    CHECK(owner_retire(a) == 0);
+    CHECK(owner_retire(b) == 0);
+}
+
+/* P9: memory is paid from a budget the caller holds. A foreign budget, no budget,
+ * or more frames than the balance are refused; a paid RAM token refunds on release. */
+static void p9_memory_is_paid_from_a_budget(void) {
+    UINT32 a = owner_new(), o = owner_new();
+    XToken bud = XTOKEN_INVALID, ram = XTOKEN_INVALID, x = XTOKEN_INVALID;
+    UINT64 bal = 0;
+    CHECK(xtok_budget_mint(a, 4, &bud) == 0);
+    CHECK(xtok_alloc_ram_from(o, bud, 1, XTOK_RIGHTS_RAM_DEFAULT, &x) != 0);
+    CHECK(x == XTOKEN_INVALID);
+    CHECK(xtok_alloc_ram_from(a, XTOKEN_INVALID, 1, XTOK_RIGHTS_RAM_DEFAULT, &x) != 0);
+    CHECK(xtok_alloc_ram_from(a, bud, 5, XTOK_RIGHTS_RAM_DEFAULT, &x) != 0);
+    CHECK(xtok_budget_balance(bud, a, &bal) == 0 && bal == 4);
+    CHECK(xtok_alloc_ram_from(a, bud, 3, XTOK_RIGHTS_RAM_DEFAULT, &ram) == 0);
+    CHECK(xtok_budget_balance(bud, a, &bal) == 0 && bal == 1);
+    CHECK(xtok_release_owned(ram, a) == 0);
+    CHECK(xtok_budget_balance(bud, a, &bal) == 0 && bal == 4);
+    CHECK(xtok_release_owned(bud, a) == 0);
+    CHECK(owner_retire(a) == 0);
+    CHECK(owner_retire(o) == 0);
+}
+
 int main(int argc, char **argv) {
     int strict = argc > 1 && strcmp(argv[1], "--strict") == 0;
     host_dev_init(&dev, 512, 1024);
@@ -169,15 +206,10 @@ int main(int argc, char **argv) {
     p4_no_unilateral_path();
     p5_no_ambient_authority();
     p6_delegated_token_serves_ring();
+    p8_revocation_reaches_lineage();
+    p9_memory_is_paid_from_a_budget();
     CHECK(xtok_live_count() == base);                /* P7: nothing leaked */
 
-#ifndef XTOK_HAS_REVOKE
-    PENDING("F1", "revoking a capability revokes its descendants");
-    PENDING("F1", "a child without RELEASE is recovered through its parent");
-#endif
-#ifndef XTOK_HAS_BUDGET
-    PENDING("F2", "memory budget is a token the owner holds, not g_quota in sys.c");
-#endif
 #ifndef XTOK_HAS_RAM_DISK
     PENDING("F3", "rd0 is memory: no ring path for a RAM device");
 #endif

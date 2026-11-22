@@ -43,6 +43,7 @@ static int user_copy_name(XAspace *as, UINT64 ptr, char *out, UINT32 max) {
 
 #include "mem/owner.h"
 #include "mem/derive_call.h"
+#include "mem/budget.h"
 #define XOWNER_TABLE (XOWNER_FIRST_INSTANCE + XOWNER_MAX)
 
 typedef struct {
@@ -223,6 +224,25 @@ static void sys_queue_close(XAspace *as, ExcFrame *f) {
     ret(f, 0);                         /* released later, by xrt_reap, once drained */
 }
 
+/* ---- XSYS_ALLOC_FROM ----------------------------------------------------
+ * Memory paid from a budget the caller presents. The kernel checks ownership
+ * and balance; it decides no limit. Every refusal is XERR_NOMEM. rdx is cleared
+ * first: the answer also travels in rdx. */
+static void sys_alloc_from(XAspace *as, ExcFrame *f) {
+    UINT64 bud    = f->rdi;
+    UINT64 frames = f->rsi;
+    UINT64 rights = f->rdx;
+    XToken out = XTOKEN_INVALID;
+    f->rdx = 0;
+
+    if (frames == 0 || rights == 0)                 { ret(f, XERR_INVAL); return; }
+    if (rights & ~(UINT64)XSYS_USER_RIGHTS)         { ret(f, XERR_PERM);  return; }
+    if (xtok_alloc_ram_from(as->owner_id, (XToken)bud, frames,
+                            (UINT32)rights, &out) != 0) { ret(f, XERR_NOMEM); return; }
+    f->rdx = (unsigned long long)out;
+    ret(f, 0);
+}
+
 /* ---- XSYS_DERIVE --------------------------------------------------------
  * Attenuation only: the caller presents a parent it holds and asks for a
  * relative subrange with rights. The child belongs to the caller. Every refusal
@@ -256,11 +276,13 @@ static const XsysHandler g_xsys_table[XSYS_TABLE_SIZE] = {
     [XSYS_QUEUE_RING]     = sys_queue_ring,
     [XSYS_QUEUE_CLOSE]    = sys_queue_close,
     [XSYS_DERIVE]         = sys_derive,
+    [XSYS_ALLOC_FROM]     = sys_alloc_from,
 };
 
 /* Every registered number must fit in the table. */
 typedef char xsys_table_fits[(XSYS_REQUEST_BLOCKS < XSYS_TABLE_SIZE) ? 1 : -1];
 typedef char xsys_derive_fits[(XSYS_DERIVE < XSYS_TABLE_SIZE) ? 1 : -1];
+typedef char xsys_alloc_from_fits[(XSYS_ALLOC_FROM < XSYS_TABLE_SIZE) ? 1 : -1];
 
 void xsys_resource(XAspace *as, ExcFrame *f) {
     UINT64 n = f->rax;
