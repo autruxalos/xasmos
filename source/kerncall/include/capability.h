@@ -13,6 +13,7 @@
 #define XTOK_KIND_IRQ    3u
 #define XTOK_KIND_BLOCKS 4u   /* a range of blocks on a registered block device */
 #define XTOK_KIND_ENDPOINT 5u /* receiver-owned transfer point (mem/endpoint.c) */
+#define XTOK_KIND_BUDGET   6u   /* memory budget: n_frames is the balance (mem/budget.h) */
 
 #define XTOK_RIGHT_READ    (1u << 0)
 #define XTOK_RIGHT_WRITE   (1u << 1)
