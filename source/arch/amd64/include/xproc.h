@@ -24,7 +24,7 @@
 #define XSYS_UNMAP  6u    /* rdi=virt                   -> rax                */
 #define XSYS_FREE   7u    /* rdi=token                  -> rax                */
 #define XSYS_INFO   8u    /* rdi=XINFO_*                -> rax=value or XERR  */
-#define XSYS_REQUEST_BLOCKS 9u  /* rdi=name ptr rsi=first block rdx=count rcx=rights -> rdx=token, rax=0 or XERR_* */
+/* 9 is reserved: the name-based request was retired (F4). */
 #define XSYS_QUEUE_CREATE 10u  /* rdi=entries (16..256, pow2) -> rax=0, rdx=token */
 #define XSYS_QUEUE_RING   11u  /* rdi=token -> rax=entries processed (a hint)    */
 #define XSYS_QUEUE_CLOSE  12u  /* rdi=token -> rax=0; released once drained      */

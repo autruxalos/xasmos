@@ -25,23 +25,6 @@
 /* Copies a NUL-terminated name from the program's memory. Every byte is read
  * only through the program's own page tables: the page must be present, 4 KiB,
  * and user-accessible (XPT_USER). Returns the length, or -1 on any refusal. */
-static int user_copy_name(XAspace *as, UINT64 ptr, char *out, UINT32 max) {
-    UINT32 i;
-    if (max == 0) return -1;
-    for (i = 0; i < max; i++) {
-        UINT64 va = ptr + i;
-        if (va < ptr) return -1;                          /* wrapped past 2^64 */
-        volatile UINT64 *pte = xpt_user_pte(as->pml4_phys, va & ~0xFFFULL);
-        if (!pte) return -1;                              /* absent or huge */
-        if (!(*pte & XPT_USER)) return -1;                /* kernel page: refuse */
-        UINT64 phys = *pte & XPT_ADDR_MASK;
-        char c = *((volatile char *)(UINTN)(phys + (va & 0xFFFULL)));
-        out[i] = c;
-        if (c == '\0') return (int)i;
-    }
-    return -1;                                            /* no terminator within max */
-}
-
 #include "mem/owner.h"
 #include "mem/derive_call.h"
 #include "mem/budget.h"
@@ -153,48 +136,6 @@ static void sys_info(XAspace *as, ExcFrame *f) {
     }
 }
 
-/* XSYS_REQUEST_BLOCKS: rdi = name pointer ("rd0", "nd0"), rsi = first block,
- * rdx = block count, rcx = rights (READ and/or WRITE only). Returns the token
- * in rdx on success, 0 in rdx on failure. Every value is checked before use,
- * and the owner is always as->owner_id. */
-static void sys_request_blocks(XAspace *as, ExcFrame *f) {
-    char name[8];
-    char full[16] = "|dev|";
-    UINT64 ptr    = f->rdi;
-    UINT64 first  = f->rsi;
-    UINT64 count  = f->rdx;
-    UINT64 rights = f->rcx;
-    f->rdx = 0;                                       /* never leave kernel bytes */
-
-    if (count == 0)                                   { ret(f, XERR_INVAL); return; }
-    if (rights == 0 ||
-        (rights & ~(UINT64)(XTOK_RIGHT_READ | XTOK_RIGHT_WRITE | XTOK_RIGHT_RELEASE))) { ret(f, XERR_PERM); return; }
-
-    int nlen = user_copy_name(as, ptr, name, sizeof name);
-    if (nlen <= 0)                                    { ret(f, XERR_INVAL); return; }
-
-    for (int i = 0; i <= nlen && i + 5 < (int)sizeof full; i++) full[5 + i] = name[i];
-
-    BlkDev *dev = dev_lookup(full);
-    if (!dev)                                         { ret(f, XERR_BADTOKEN); return; }
-
-    if (!xtok_grant_check_range(name, as->owner_id, (UINT32)rights, first, count)) {
-        ret(f, XERR_PERM);
-        return;
-    }
-
-    /* Range check without overflow: first + count must not pass the device. */
-    UINT64 total = blk_sector_count(dev);
-    if (first > total || count > total - first)       { ret(f, XERR_RANGE); return; }
-
-    XToken tok = xtok_alloc_blocks(as->owner_id, dev, first, count, (UINT32)rights);
-    if (tok == XTOKEN_INVALID)                        { ret(f, XERR_NOMEM); return; }
-
-    f->rdx = tok;
-    ret(f, 0);
-}
-
-
 /* ---- program rings (XSYS_QUEUE_*) ----------------------------------------
  * Validation only; the table (xring_table.c) decides everything. The owner is
  * always the caller's own address space, never an argument. A token that is not
@@ -202,7 +143,8 @@ static void sys_request_blocks(XAspace *as, ExcFrame *f) {
 static void sys_queue_create(XAspace *as, ExcFrame *f) {
     XToken tok = XTOKEN_INVALID;
     f->rdx = 0;                        /* same convention as sys_alloc */
-    int rc = xrt_create(as->owner_id, (UINT32)f->rdi, &tok);
+    /* rdi = entries, rsi = budget the ring's frames are paid from (S2c+F4 model). */
+    int rc = xrt_create(as->owner_id, (XToken)f->rsi, (UINT32)f->rdi, &tok);
     if (rc > 0) {
         f->rdx = (unsigned long long)tok;
         ret(f, 0);
@@ -312,7 +254,6 @@ static const XsysHandler g_xsys_table[XSYS_TABLE_SIZE] = {
     [XSYS_UNMAP]          = sys_unmap,
     [XSYS_FREE]           = sys_free,
     [XSYS_INFO]           = sys_info,
-    [XSYS_REQUEST_BLOCKS] = sys_request_blocks,
     [XSYS_QUEUE_CREATE]   = sys_queue_create,
     [XSYS_QUEUE_RING]     = sys_queue_ring,
     [XSYS_QUEUE_CLOSE]    = sys_queue_close,
@@ -324,7 +265,6 @@ static const XsysHandler g_xsys_table[XSYS_TABLE_SIZE] = {
 };
 
 /* Every registered number must fit in the table. */
-typedef char xsys_table_fits[(XSYS_REQUEST_BLOCKS < XSYS_TABLE_SIZE) ? 1 : -1];
 typedef char xsys_derive_fits[(XSYS_DERIVE < XSYS_TABLE_SIZE) ? 1 : -1];
 typedef char xsys_alloc_from_fits[(XSYS_ALLOC_FROM < XSYS_TABLE_SIZE) ? 1 : -1];
 typedef char xsys_budget_fits[(XSYS_BUDGET_DERIVE < XSYS_TABLE_SIZE) ? 1 : -1];

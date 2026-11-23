@@ -100,21 +100,31 @@ XToken g_exit_budget = XTOKEN_INVALID;
 /* Shell identity: a fixed, long-lived owner created by the boot. It is not
  * RUN_OWNER, so the reap of a program can never reach the shell's tokens. */
 UINT32 g_shell_owner = 0;
-XToken g_shell_recv = XTOKEN_INVALID;   /* the shell accepts offers here */
-XToken g_shell_send = XTOKEN_INVALID;   /* minted for init_owner: init may offer */
+/* Three lanes, one pending offer each (an endpoint holds one offer at a time). */
+#define SHELL_LANE_BUDGET 0
+#define SHELL_LANE_RD0    1
+#define SHELL_LANE_ND0    2
+XToken g_shell_recv[3] = { XTOKEN_INVALID, XTOKEN_INVALID, XTOKEN_INVALID };
+XToken g_shell_send[3] = { XTOKEN_INVALID, XTOKEN_INVALID, XTOKEN_INVALID };
+XToken g_shell_budget  = XTOKEN_INVALID;   /* accepted by the boot in the shell's name */
+XToken g_shell_rd0     = XTOKEN_INVALID;
+XToken g_shell_nd0     = XTOKEN_INVALID;
 
 
 /* S2a: the shell's endpoint. The receiver (shell) opens it and mints the SEND
  * for init_owner; no token moves, only the right to offer is issued. */
 static void boot_shell_endpoint(UINT32 init_owner) {
+    UINT32 i;
     g_shell_owner = owner_new();
     if (g_shell_owner == 0) { xk_println("[BOOT] shell owner FAILED"); return; }
-    if (xep_create(g_shell_owner, &g_shell_recv) != 0) { xk_println("[BOOT] shell endpoint FAILED"); return; }
-    if (xep_send_cap(g_shell_owner, g_shell_recv, init_owner, &g_shell_send) != 0) {
-        xk_println("[BOOT] shell send FAILED");
-        return;
+    for (i = 0; i < 3; i++) {
+        if (xep_create(g_shell_owner, &g_shell_recv[i]) != 0 ||
+            xep_send_cap(g_shell_owner, g_shell_recv[i], init_owner, &g_shell_send[i]) != 0) {
+            xk_println("[BOOT] shell endpoint FAILED");
+            return;
+        }
     }
-    xk_println("[BOOT] shell endpoint ready");
+    xk_println("[BOOT] shell endpoints ready (3)");
 }
 
 static void exit_print_u(UINT64 v);
@@ -174,64 +184,71 @@ static void exit_print_u(UINT64 v) {
 
 /* Teardown. Not xproc_reap(init_owner): that would reclaim the roots themselves.
  * A root whose give fails stays with init_owner and is never reclaimed. */
-/* The shell accepts the budget exit offered through its SEND. Until the shell is
- * a program (init.exb), the boot accepts for it: the RECV is the shell's own. */
-XToken g_shell_budget = XTOKEN_INVALID;
-
-static void boot_accept_shell_budget(void) {
+/* The shell accepts what exit offered, one lane per offer. Until the shell is a
+ * .exb the boot accepts in its name: each RECV is the shell's own. */
+static void boot_accept_shell_lanes(void) {
     XToken got = XTOKEN_INVALID;
     UINT64 bal = 0;
-    if (g_shell_recv == XTOKEN_INVALID) return;
-    if (xtok_accept(g_shell_owner, g_shell_recv, &got) != 0) {
+    if (g_shell_recv[SHELL_LANE_BUDGET] != XTOKEN_INVALID &&
+        xtok_accept(g_shell_owner, g_shell_recv[SHELL_LANE_BUDGET], &got) == 0) {
+        g_shell_budget = got;
+        if (xtok_budget_balance(got, g_shell_owner, &bal) == 0) {
+            xk_print("[SHELL] budget accepted, balance ");
+            exit_print_u(bal);
+            xk_println("");
+        }
+    } else {
         xk_println("[SHELL] no budget offered by exit");
-        return;
     }
-    g_shell_budget = got;
-    if (xtok_budget_balance(got, g_shell_owner, &bal) == 0) {
-        xk_print("[SHELL] budget accepted, balance ");
-        exit_print_u(bal);
-        xk_println("");
+    got = XTOKEN_INVALID;
+    if (g_shell_recv[SHELL_LANE_RD0] != XTOKEN_INVALID &&
+        xtok_accept(g_shell_owner, g_shell_recv[SHELL_LANE_RD0], &got) == 0) {
+        g_shell_rd0 = got;
+        xk_println("[SHELL] disk root rd0 accepted");
+    } else {
+        xk_println("[SHELL] no rd0 root offered");
+    }
+    got = XTOKEN_INVALID;
+    if (g_shell_recv[SHELL_LANE_ND0] != XTOKEN_INVALID &&
+        xtok_accept(g_shell_owner, g_shell_recv[SHELL_LANE_ND0], &got) == 0) {
+        g_shell_nd0 = got;
+        xk_println("[SHELL] disk root nd0 accepted");
+    } else {
+        xk_println("[SHELL] no nd0 root offered");
     }
 }
 
+
 static void exit_cleanup(UINT32 boot_owner, UINT32 init_owner) {
-    boot_accept_shell_budget();
-    XToken keep[4] = { XTOKEN_INVALID, XTOKEN_INVALID, XTOKEN_INVALID, XTOKEN_INVALID };
     XToken list[64];
-
-    if (g_exit_root_rd0 != XTOKEN_INVALID &&
-        xtok_give(init_owner, g_exit_root_rd0, boot_owner) != 0)
-        keep[0] = g_exit_root_rd0;
-    if (g_exit_root_nd0 != XTOKEN_INVALID &&
-        xtok_give(init_owner, g_exit_root_nd0, boot_owner) != 0)
-        keep[1] = g_exit_root_nd0;
-
-    if (g_shell_send != XTOKEN_INVALID) keep[3] = g_shell_send;   /* the shell's right to be offered to */
-    if (g_exit_budget != XTOKEN_INVALID &&
-        xep_transfer(init_owner, g_exit_budget, boot_owner, 0) != 0)
-        keep[2] = g_exit_budget;   /* never reclaimed: a budget is memory's balance */
-
+    XToken keep[6];
+    UINT32 nk = 0, n, k, i, progress;
+    (void)boot_owner;
+    boot_accept_shell_lanes();
+    keep[nk++] = g_exit_root_rd0;
+    keep[nk++] = g_exit_root_nd0;
+    keep[nk++] = g_exit_budget;
+    for (i = 0; i < 3; i++) keep[nk++] = g_shell_send[i];
     for (;;) {
-        UINT32 n = xtok_owner_tokens(init_owner, list, 64);
-        UINT32 progress = 0;
+        n = xtok_owner_tokens(init_owner, list, 64);
         if (n == 0) break;
-        for (UINT32 k = 0; k < n; k++) {
-            if (list[k] == keep[0] || list[k] == keep[1] || list[k] == keep[2] || list[k] == keep[3]) continue;
+        progress = 0;
+        for (k = 0; k < n; k++) {
+            int kept = 0;
+            for (i = 0; i < nk; i++) if (list[k] == keep[i]) kept = 1;
+            if (kept) continue;
             xas_revoke_token(list[k]);
             if (xtok_reclaim(list[k]) == 0) progress++;
         }
         if (progress == 0) break;
     }
-
-    /* init_owner is long-lived: it holds the SEND the shell is offered through
-     * (S2b). It is retired only when init.exb ends, never by exit. */
     {
         UINT64 f = 0;
         UINT32 t = 0;
         xtok_owner_usage(init_owner, &f, &t);
         xk_print("[EXIT] init owner kept: ");
         exit_print_u(t);
-        xk_println(" token(s), the shell SEND");
+        xk_println(" token(s): budget remainder and the shell's SENDs");
     }
 }
 
@@ -252,7 +269,6 @@ static void exit_launch(UINT32 boot_owner, UINT32 init_owner) {
         exit_cleanup(boot_owner, init_owner);
         return;
     }
-
     lrc = xload_exb(&as, init_owner, exit_prog_exb, exit_prog_exb_len, &res);
     if (lrc != XLOAD_OK) {
         xk_print("[EXIT] exit: load failed, code ");
@@ -262,8 +278,10 @@ static void exit_launch(UINT32 boot_owner, UINT32 init_owner) {
         xctx_init(&ctx, res.entry, res.stack_top);
         ctx.rdi = (UINT64)g_exit_root_rd0;
         ctx.rsi = (UINT64)g_exit_root_nd0;
-        ctx.rdx = (UINT64)g_exit_budget;   /* exit does not spend it yet (S2) */
-        ctx.rcx = (UINT64)g_shell_send;   /* the shell's SEND, S2b */
+        ctx.rdx = (UINT64)g_exit_budget;
+        ctx.rcx = (UINT64)g_shell_send[SHELL_LANE_BUDGET];
+        ctx.r8  = (UINT64)g_shell_send[SHELL_LANE_RD0];
+        ctx.r9  = (UINT64)g_shell_send[SHELL_LANE_ND0];
         while ((st == XPROC_PREEMPT || st == XPROC_YIELD) && slices < EXIT_MAX_SLICES) {
             st = xproc_run_ctx(&as, &ctx, &r);
             slices++;
@@ -279,18 +297,12 @@ static void exit_launch(UINT32 boot_owner, UINT32 init_owner) {
             exit_print_u(slices);
             xk_println("");
         }
+        xas_destroy(&as);
     }
-
-    xas_destroy(&as);
     exit_cleanup(boot_owner, init_owner);
 }
 
 int stage_volumes(void) {
-    xtok_grant_init();
-    xk_println(xtok_grant_check("rd0", XTOK_OWNER_FIRST_APP, XTOK_RIGHT_READ)
-        ? "[EXIT] grant rd0 read: allowed" : "[EXIT] grant rd0 read: DENIED");
-    xk_println(xtok_grant_check("nd0", XTOK_OWNER_FIRST_APP, XTOK_RIGHT_READ)
-        ? "[EXIT] grant nd0 read: ALLOWED (wrong)" : "[EXIT] grant nd0 read: denied");
     if (ramdisk_init(&g_boot, g_boot_mem, BOOT_VOLUME_BYTES, 512u) != BLK_OK) {
         xk_println("[EXIT ERROR] boot volume memory rejected");
         return -1;
@@ -374,7 +386,6 @@ int stage_volumes(void) {
     /* Program ring table: the boot sets the policy, programs never do.
      * Empty at boot, so this changes nothing until XSYS_QUEUE_CREATE exists. */
     xrt_init(nvme_route_unbind, nvme_route_bind);
-    xrt_set_cap(XTOK_OWNER_FIRST_APP, 2);
 
     /* Delivery test: a polled read on nd0, then a controlled window with
      * interrupts on. The completion's MSI-X notice must be counted once. */

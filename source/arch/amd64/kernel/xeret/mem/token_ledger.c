@@ -537,83 +537,18 @@ int xtok_blk_io(XToken tok, UINT32 op, UINT64 lba, UINT32 count, void *buf) {
  * first application (read and write), nothing for nd0. Nothing here reads the
  * disk, so an unreadable or hostile volume cannot widen what is granted. */
 
-static XTokenGrant g_grants[XTOK_GRANT_MAX];
-static UINT32      g_grant_count;
 
-static void grant_put(UINT32 idx, const char *dev, UINT32 owner, UINT32 rights) {
-    UINT32 k = 0;
-    while (dev[k] != '\0' && k < sizeof g_grants[idx].dev - 1) {
-        g_grants[idx].dev[k] = dev[k];
-        k++;
-    }
-    g_grants[idx].dev[k] = '\0';
-    g_grants[idx].owner_id = owner;
-    g_grants[idx].rights   = rights;
-    g_grants[idx].first    = 0;
-    g_grants[idx].count    = 0;
-}
 
-void xtok_grant_init(void) {
-    g_grant_count = 0;
-    grant_put(g_grant_count++, "rd0", XTOK_OWNER_FIRST_APP,
-              XTOK_RIGHT_READ | XTOK_RIGHT_WRITE | XTOK_RIGHT_RELEASE);
-    /* Test range on the system disk: data blocks 4096..4103, read and release.
-     * Set by the boot, never by a program. */
-    xtok_grant_put_range("nd0", XTOK_OWNER_FIRST_APP,
-                         XTOK_RIGHT_READ | XTOK_RIGHT_RELEASE, 4096, 8);
-}
-
-static int name_eq(const char *a, const char *b) {
-    while (*a != '\0' && *a == *b) { a++; b++; }
-    return *a == *b;
-}
 
 /* One grant against one request. A whole-device request (count 0) needs a
  * whole-device grant; a range request must fall inside the granted range. The
  * arithmetic never adds past 64 bits: count is compared first, then the offset. */
-static int grant_match(const XTokenGrant *g, const char *dev, UINT32 owner,
-                       UINT32 rights, UINT64 lba, UINT64 count) {
-    if (g->owner_id != owner || !name_eq(g->dev, dev)) return 0;
-    if ((g->rights & rights) != rights) return 0;
-    if (count == 0) return g->count == 0;
-    if (g->count == 0) return 1;
-    if (count > g->count) return 0;
-    if (lba < g->first) return 0;
-    return (lba - g->first) <= (g->count - count);
-}
 
-void xtok_grants_reset(void) {
-    g_grant_count = 0;
-}
 
-int xtok_grant_put_full(const char *dev, UINT32 owner, UINT32 rights) {
-    if (g_grant_count >= XTOK_GRANT_MAX) return -1;
-    grant_put(g_grant_count++, dev, owner, rights);
-    return 0;
-}
 
-int xtok_grant_put_range(const char *dev, UINT32 owner, UINT32 rights,
-                         UINT64 first, UINT64 count) {
-    if (count == 0 || g_grant_count >= XTOK_GRANT_MAX) return -1;
-    grant_put(g_grant_count, dev, owner, rights);
-    g_grants[g_grant_count].first = first;
-    g_grants[g_grant_count].count = count;
-    g_grant_count++;
-    return 0;
-}
 
-int xtok_grant_check_range(const char *dev, UINT32 owner, UINT32 rights,
-                           UINT64 lba, UINT64 count) {
-    UINT32 i;
-    for (i = 0; i < g_grant_count; i++)
-        if (grant_match(&g_grants[i], dev, owner, rights, lba, count)) return 1;
-    return 0;
-}
 
 /* Whole-device check, kept for callers that do not name a range. */
-int xtok_grant_check(const char *dev, UINT32 owner, UINT32 rights) {
-    return xtok_grant_check_range(dev, owner, rights, 0, 0);
-}
 
 /* ---- Ring pins -------------------------------------------------------------
  * A ring entry touches two tokens: a block range, which the device reads or

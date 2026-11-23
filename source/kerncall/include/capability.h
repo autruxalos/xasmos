@@ -42,27 +42,6 @@ typedef UINT64 XToken;
 
 /* Device grants: which owner may request block tokens on which device, and
  * with which maximum rights. An empty table grants nothing. */
-#define XTOK_GRANT_MAX 16u
-
-typedef struct {
-    char    dev[8];      /* registered name, e.g. "rd0" or "nd0" */
-    UINT32  owner_id;    /* program allowed to request the token */
-    UINT32  rights;      /* maximum rights granted */
-    UINT64  first;       /* range grant: first block granted          */
-    UINT64  count;       /* range grant: blocks granted; 0 = whole device */
-} XTokenGrant;
-
-/* Copies the built-in minimal policy into the active table at boot. */
-void xtok_grant_init(void);
-
-/* 1 if an entry covers the request (device, owner, rights), 0 otherwise. */
-int  xtok_grant_check(const char *dev, UINT32 owner, UINT32 rights);
-void xtok_grants_reset(void);
-int  xtok_grant_put_full(const char *dev, UINT32 owner, UINT32 rights);
-int  xtok_grant_put_range(const char *dev, UINT32 owner, UINT32 rights,
-                          UINT64 first, UINT64 count);
-int  xtok_grant_check_range(const char *dev, UINT32 owner, UINT32 rights,
-                            UINT64 lba, UINT64 count);
 
 /* Field meaning depends on kind:
  *   RAM:    phys = physical address, n_frames = frame count
