@@ -53,6 +53,7 @@ Requirements for the default target (amd64, UEFI):
 - `lld-link`
 - `make`
 - `rexx (regina)`
+- `mtools`
 
 ```sh
 make                  # builds build/amd64-uefi/esp/EFI/BOOT/BOOTX64.EFI
