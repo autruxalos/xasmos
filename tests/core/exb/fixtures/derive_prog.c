@@ -5,7 +5,7 @@
 
 #define SYS_EXIT         1
 #define SYS_YIELD        3
-#define SYS_ALLOC        4
+#define SYS_ALLOC_FROM   14
 #define SYS_MAP          5
 #define SYS_UNMAP        6
 #define SYS_FREE         7
@@ -31,7 +31,7 @@ void prog_main(unsigned long long rdi, unsigned long long rsi,
     st = sc4(SYS_DERIVE, (long long)lane, 8, 8, RIGHTS_RR, &child);
     if (st != 0 || child == 0) sc(SYS_EXIT, 3, 0, 0, 0);
 
-    rc = sc(SYS_ALLOC, 1, RIGHTS_RW, 0, &dtok);
+    rc = sc(SYS_ALLOC_FROM, (long long)budget, 1, RIGHTS_RW, &dtok);
     if (rc != 0 || dtok == 0) sc(SYS_EXIT, 5, 0, 0, 0);
 
     rc = sc(SYS_QUEUE_CREATE, RING_N, (long long)budget, 0, &qtok);
