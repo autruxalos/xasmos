@@ -4,7 +4,19 @@ SRC_DIR := source
 EFI_OUT := $(BUILD)/esp/EFI/BOOT/BOOTX64.EFI
 IMG     := $(BUILD)/esp.img
 DISK    := xasmos.img
-OVMF    ?= /usr/share/edk2/x64/OVMF.4m.fd
+OVMF_CANDIDATES := 	/usr/share/edk2/OvmfX64/OVMF_CODE.fd 	/usr/local/share/qemu/edk2-x86_64-code.fd 	/usr/share/edk2/x64/OVMF_CODE.4m.fd 	/usr/share/edk2/x64/OVMF.4m.fd 	/usr/share/OVMF/OVMF_CODE.fd
+
+OVMF ?= $(firstword $(wildcard $(OVMF_CANDIDATES)))
+
+ifeq ($(OVMF),/usr/share/edk2/OvmfX64/OVMF_CODE.fd)
+	OVMF_VARS_SRC ?= /usr/share/edk2/OvmfX64/OVMF_VARS.fd
+else ifeq ($(OVMF),/usr/local/share/qemu/edk2-x86_64-code.fd)
+	OVMF_VARS_SRC ?= /usr/local/share/qemu/edk2-x86_64-vars.fd
+else ifeq ($(OVMF),/usr/share/edk2/x64/OVMF_CODE.4m.fd)
+	OVMF_VARS_SRC ?= /usr/share/edk2/x64/OVMF_VARS.4m.fd
+else ifeq ($(OVMF),/usr/share/OVMF/OVMF_CODE.fd)
+	OVMF_VARS_SRC ?= /usr/share/OVMF/OVMF_VARS.fd
+endif
 
 SRCS := \
         arch/amd64/boot/exord/efi/efi_main.c \
@@ -68,9 +80,9 @@ SRCS := \
         core/exb/load.c
 OBJS := $(SRCS:%.c=$(BUILD)/obj/%.o)
 
-ACCEL ?= kvm
-LLD_LINK ?= lld-link
-CLANG_RES ?= third_party/clang-res/21
+ACCEL ?= $(shell if [ -w /dev/kvm ]; then echo kvm; elif [ -w /dev/nvmm ]; then echo nvmm; else echo tcg; fi)
+LLD_LINK ?= $(shell for bin in lld-link lld-link-21 lld-link-20 lld-link-19 lld-link-18; do command -v $$bin 2>/dev/null && break; done)
+CLANG_RES ?= $(if $(wildcard third_party/clang-res/21/include),third_party/clang-res/21,$(shell clang -print-resource-dir 2>/dev/null))
 CFLAGS := -target x86_64-unknown-windows -ffreestanding -fshort-wchar \
           -isystem $(CLANG_RES)/include \
           -mno-red-zone -fno-stack-protector -fno-stack-check -Wall -Wextra \
@@ -126,9 +138,9 @@ disk:
 # boot without -device nvme, or the result does not represent the system.
 # NVRAM for UEFI: a writable copy, created empty on first use.
 $(BUILD)/OVMF_VARS.fd:
+	@if [ -z "$(OVMF)" ] || [ ! -f "$(OVMF)" ]; then 		echo "Error: No se encontro firmware OVMF. Pasa OVMF=/ruta/a/OVMF_CODE.fd"; 		exit 1; 	fi
 	mkdir -p $(BUILD)
-	dd if=/dev/zero of=$@ bs=1k count=528 status=none
-
+	@if [ -n "$(OVMF_VARS_SRC)" ] && [ -f "$(OVMF_VARS_SRC)" ]; then 		cp "$(OVMF_VARS_SRC)" $@; 	else 		SIZE=$$(wc -c < "$(OVMF)" | tr -d " "); 		dd if=/dev/zero of=$@ bs=1 count=$$SIZE status=none; 	fi
 qemu: $(IMG) $(DISK) $(BUILD)/OVMF_VARS.fd
 	qemu-system-x86_64 -machine q35 -cpu qemu64 -accel $(ACCEL) -m 512M \
 	  -drive if=pflash,format=raw,readonly=on,file=$(OVMF) \
