@@ -77,6 +77,8 @@ SRCS := \
         core/xerlibc/src/str.c \
         core/xerlibc/src/fmt.c \
         core/blk/blk.c \
+	core/blk/part.c \
+	core/blk/md0.c \
         core/blk/ramdisk.c \
         core/dev/dev.c \
         core/irq/irqvec.c \
@@ -174,7 +176,7 @@ HOST_CC  := clang -std=c11 -Wall -Wextra -g $(HOST_SAN)
 HOST_BIN   := build/host
 
 host-tests: $(HOST_BIN)/xtok_blk_test $(HOST_BIN)/xtok_pin_test $(HOST_BIN)/xring_test \
-            $(HOST_BIN)/irqvec_test $(HOST_BIN)/irqvec_mt_test $(HOST_BIN)/xqueue_test $(HOST_BIN)/nvme_xq_test $(HOST_BIN)/nvme_q_test $(HOST_BIN)/xhci_q_test $(HOST_BIN)/usb_msc_q_test $(HOST_BIN)/ahci_q_test $(HOST_BIN)/ide_q_test $(HOST_BIN)/nvme_submit_test $(HOST_BIN)/nvme_route_test $(HOST_BIN)/xqueue_mt_test $(HOST_BIN)/nvme_busy_test $(HOST_BIN)/xring_inflight_test $(HOST_BIN)/xring_close_test $(HOST_BIN)/xring_table_test $(HOST_BIN)/xring_reentry_test $(HOST_BIN)/sha512_test $(HOST_BIN)/owner_test $(HOST_BIN)/give_test $(HOST_BIN)/boot_init_test $(HOST_BIN)/derive_call_test $(HOST_BIN)/delegate_test $(HOST_BIN)/endpoint_test $(HOST_BIN)/revoke_test $(HOST_BIN)/budget_test $(HOST_BIN)/exo_full_test $(HOST_BIN)/rd0_memory_test $(HOST_BIN)/exo_sequence_test $(HOST_BIN)/exokernel_system_test
+            $(HOST_BIN)/irqvec_test $(HOST_BIN)/irqvec_mt_test $(HOST_BIN)/xqueue_test $(HOST_BIN)/nvme_xq_test $(HOST_BIN)/nvme_q_test $(HOST_BIN)/xhci_q_test $(HOST_BIN)/usb_msc_q_test $(HOST_BIN)/ahci_q_test $(HOST_BIN)/ide_q_test $(HOST_BIN)/part_md0_test $(HOST_BIN)/nvme_submit_test $(HOST_BIN)/nvme_route_test $(HOST_BIN)/xqueue_mt_test $(HOST_BIN)/nvme_busy_test $(HOST_BIN)/xring_inflight_test $(HOST_BIN)/xring_close_test $(HOST_BIN)/xring_table_test $(HOST_BIN)/xring_reentry_test $(HOST_BIN)/sha512_test $(HOST_BIN)/owner_test $(HOST_BIN)/give_test $(HOST_BIN)/boot_init_test $(HOST_BIN)/derive_call_test $(HOST_BIN)/delegate_test $(HOST_BIN)/endpoint_test $(HOST_BIN)/revoke_test $(HOST_BIN)/budget_test $(HOST_BIN)/exo_full_test $(HOST_BIN)/rd0_memory_test $(HOST_BIN)/exo_sequence_test $(HOST_BIN)/exokernel_system_test
 	@for t in $^; do echo "== $$t"; ./$$t || exit 1; done
 
 $(HOST_BIN):
@@ -225,6 +227,9 @@ $(HOST_BIN)/nvme_xq_test: $(HOST_BIN) tests/core/nvme/nvme_xq_test.c \
 	$(HOST_CC) -I$(SRC_DIR)/arch/amd64/drivers/storage/nvme -I$(SRC_DIR)/core/xqueue \
 	  tests/core/nvme/nvme_xq_test.c $(SRC_DIR)/arch/amd64/drivers/storage/nvme/nvme_xq.c \
 	  -o $@
+
+$(HOST_BIN)/part_md0_test: $(HOST_BIN) tests/core/blk/part_md0_test.c $(SRC_DIR)/core/blk/blk.c $(SRC_DIR)/core/blk/ramdisk.c $(SRC_DIR)/core/blk/part.c $(SRC_DIR)/core/blk/md0.c
+	$(HOST_CC) -I$(SRC_DIR)/core/blk tests/core/blk/part_md0_test.c $(SRC_DIR)/core/blk/blk.c $(SRC_DIR)/core/blk/ramdisk.c $(SRC_DIR)/core/blk/part.c $(SRC_DIR)/core/blk/md0.c -o $@
 
 $(HOST_BIN)/ide_q_test: $(HOST_BIN) tests/core/storage/ide_q_test.c $(SRC_DIR)/arch/amd64/drivers/storage/ide/ide_q.c $(SRC_DIR)/arch/amd64/drivers/storage/ide/ide_q.h
 	$(HOST_CC) -I$(SRC_DIR)/arch/amd64/drivers/storage/ide tests/core/storage/ide_q_test.c $(SRC_DIR)/arch/amd64/drivers/storage/ide/ide_q.c -o $@
