@@ -33,6 +33,10 @@
 #define XSYS_BUDGET_DERIVE 15u  /* rdi=budget rsi=frames -> rdx=child, rax=0 or XERR_* */
 #define XSYS_OFFER         16u  /* rdi=token (GIVE) rsi=SEND -> rax=0 or XERR_*           */
 #define XSYS_ACCEPT        17u  /* rdi=RECV -> rdx=token, rax=0 or XERR_*                 */
+#define XSYS_WRITE          18u
+#define XSYS_READLINE       19u
+#define XSYS_CLEAR          20u
+#define XSYS_SHELL_CMD      21u
 
 /* Size of the resource dispatch table. Every XSYS_* above must be below it:
  * the static assert in sys.c fails the build otherwise. */

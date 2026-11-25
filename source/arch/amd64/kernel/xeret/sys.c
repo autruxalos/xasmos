@@ -191,6 +191,90 @@ static void sys_derive(XAspace *as, ExcFrame *f) {
     ret(f, 0);
 }
 
+#include "paging.h"
+extern void xk_print(const char *s);
+extern int xk_readline(char *buf, int max_len);
+extern void xk_clear(void);
+extern void shell_set_caps(UINT32 owner, XToken bud, XToken rd0, XToken nd0);
+extern int shell_dispatch(const char *cmd, const char *arg);
+
+static int copy_from_user(XAspace *as, void *dst, UINT64 uva, UINT64 len) {
+    UINT8 *out = (UINT8 *)dst;
+    for (UINT64 i = 0; i < len; i++) {
+        UINT64 va = uva + i;
+        volatile UINT64 *pte = xpt_user_pte(as->pml4_phys, va);
+        if (!pte || !(*pte & (XPT_PRESENT | XPT_USER))) return -1;
+        UINT64 pa = (*pte & XPT_ADDR_MASK) | (va & 0xFFFULL);
+        out[i] = *(const UINT8 *)(uintptr_t)pa;
+    }
+    return 0;
+}
+
+static int copy_to_user(XAspace *as, UINT64 uva, const void *src, UINT64 len) {
+    const UINT8 *in = (const UINT8 *)src;
+    for (UINT64 i = 0; i < len; i++) {
+        UINT64 va = uva + i;
+        volatile UINT64 *pte = xpt_user_pte(as->pml4_phys, va);
+        if (!pte || ((*pte & (XPT_PRESENT | XPT_USER | XPT_WRITE)) != (XPT_PRESENT | XPT_USER | XPT_WRITE))) return -1;
+        UINT64 pa = (*pte & XPT_ADDR_MASK) | (va & 0xFFFULL);
+        *(UINT8 *)(uintptr_t)pa = in[i];
+    }
+    return 0;
+}
+
+static int copy_cstr_user(XAspace *as, char *dst, UINT64 uva, UINT64 max) {
+    for (UINT64 i = 0; i + 1 < max; i++) {
+        char c = 0;
+        if (copy_from_user(as, &c, uva + i, 1) != 0) return -1;
+        dst[i] = c;
+        if (c == 0) return 0;
+    }
+    dst[max - 1] = 0;
+    return 0;
+}
+
+static void sys_write_con(XAspace *as, ExcFrame *f) {
+    char buf[257];
+    UINT64 len = f->rsi;
+    if (len > 256) len = 256;
+    if (len > 0 && copy_from_user(as, buf, f->rdi, len) != 0) { ret(f, XERR_NOMAP); return; }
+    buf[len] = 0;
+    xk_print(buf);
+    f->rax = len;
+}
+
+static void sys_readline_con(XAspace *as, ExcFrame *f) {
+    char buf[260];
+    UINT64 max = f->rsi;
+    if (max == 0) { ret(f, XERR_INVAL); return; }
+    if (max > sizeof(buf)) max = sizeof(buf);
+    int n = xk_readline(buf, (int)max);
+    if (n < 0) { ret(f, XERR_INVAL); return; }
+    UINT64 bytes = (UINT64)n + 1;
+    if (bytes > max) bytes = max;
+    if (copy_to_user(as, f->rdi, buf, bytes) != 0) { ret(f, XERR_NOMAP); return; }
+    f->rax = (UINT64)n;
+}
+
+static void sys_clear_con(XAspace *as, ExcFrame *f) {
+    (void)as;
+    xk_clear();
+    ret(f, 0);
+}
+
+extern void xproc_yield_from_syscall(ExcFrame *f, UINT64 rax_ret);
+struct { int pending; char cmd[64]; char arg[200]; XToken bud, rd0, nd0; } g_shell_req;
+
+static void sys_shell_cmd(XAspace *as, ExcFrame *f) {
+    if (copy_cstr_user(as, g_shell_req.cmd, f->rdi, sizeof(g_shell_req.cmd)) != 0) { ret(f, XERR_NOMAP); return; }
+    if (copy_cstr_user(as, g_shell_req.arg, f->rsi, sizeof(g_shell_req.arg)) != 0) { ret(f, XERR_NOMAP); return; }
+    g_shell_req.bud = (XToken)f->rdx;
+    g_shell_req.rd0 = (XToken)f->rcx;
+    g_shell_req.nd0 = (XToken)f->r8;
+    g_shell_req.pending = 1;
+    xproc_yield_from_syscall(f, 0);
+}
+
 typedef void (*XsysHandler)(XAspace *as, ExcFrame *f);
 
 static const XsysHandler g_xsys_table[XSYS_TABLE_SIZE] = {
@@ -205,7 +289,11 @@ static const XsysHandler g_xsys_table[XSYS_TABLE_SIZE] = {
     [XSYS_ALLOC_FROM]     = sys_alloc_from,
     [XSYS_BUDGET_DERIVE]  = sys_budget_derive,
     [XSYS_OFFER]          = sys_offer,
-    [XSYS_ACCEPT]         = sys_accept,
+    [XSYS_ACCEPT]        = sys_accept,
+    [XSYS_WRITE]         = sys_write_con,
+    [XSYS_READLINE]      = sys_readline_con,
+    [XSYS_CLEAR]         = sys_clear_con,
+    [XSYS_SHELL_CMD]     = sys_shell_cmd,
 };
 
 /* Every registered number must fit in the table. */

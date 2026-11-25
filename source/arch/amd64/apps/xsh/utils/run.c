@@ -191,7 +191,7 @@ int cmd_run_main(const char *name) {
    xk_print("slices=");
    put_dec(slices);
    xk_print(" reclaimed=");
-   put_dec(xproc_reap(&as));
+   UINT32 reclaimed = xproc_reap(&as); put_dec(reclaimed);
    xk_println("");
 
    if (owner_retire(owner) != 0) {

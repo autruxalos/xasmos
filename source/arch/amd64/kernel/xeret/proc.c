@@ -106,6 +106,15 @@ static void save_ctx(XContext *c, const ExcFrame *f) {
     c->rip = f->rip; c->rsp = f->rsp; c->rflags = f->rflags;
 }
 
+void xproc_yield_from_syscall(ExcFrame *f, UINT64 rax_ret) {
+    if (!g_ctx || !g_res) return;
+    f->rax = rax_ret;
+    save_ctx(g_ctx, f);
+    g_res->reason = XPROC_YIELD;
+    g_res->rip    = f->rip;
+    xproc_leave_asm(XPROC_YIELD);
+}
+
 static void user_hook(ExcFrame *f, unsigned long long cr2) {
     if (!g_res) {
         /* A ring-3 trap with no run in progress: nothing sane to resume. */

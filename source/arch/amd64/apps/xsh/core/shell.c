@@ -378,3 +378,17 @@ void shell_main(void) {
         __asm__ volatile ("cli; hlt");
     }
 }
+#include "capability.h"
+extern UINT32 g_shell_owner;
+extern XToken g_shell_budget;
+extern XToken g_shell_rd0;
+extern XToken g_shell_nd0;
+void shell_set_caps(UINT32 owner, XToken bud, XToken rd0, XToken nd0) {
+    g_shell_owner  = owner;
+    g_shell_budget = bud;
+    g_shell_rd0    = rd0;
+    g_shell_nd0    = nd0;
+}
+int shell_dispatch(const char *cmd, const char *arg) {
+    return dispatch(cmd, arg);
+}

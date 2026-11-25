@@ -10,6 +10,7 @@
  * out as page tables, so the stage fails.
  ******************************************************************************/
 #include "exit_prog_exb.h"
+#include "../../apps/xsh/images/xsh_prog_exb.h"
 #include "capability.h"
 #include "xload.h"
 #include "xproc.h"
@@ -184,47 +185,12 @@ static void exit_print_u(UINT64 v) {
 
 /* Teardown. Not xproc_reap(init_owner): that would reclaim the roots themselves.
  * A root whose give fails stays with init_owner and is never reclaimed. */
-/* The shell accepts what exit offered, one lane per offer. Until the shell is a
- * .exb the boot accepts in its name: each RECV is the shell's own. */
-static void boot_accept_shell_lanes(void) {
-    XToken got = XTOKEN_INVALID;
-    UINT64 bal = 0;
-    if (g_shell_recv[SHELL_LANE_BUDGET] != XTOKEN_INVALID &&
-        xtok_accept(g_shell_owner, g_shell_recv[SHELL_LANE_BUDGET], &got) == 0) {
-        g_shell_budget = got;
-        if (xtok_budget_balance(got, g_shell_owner, &bal) == 0) {
-            xk_print("[SHELL] budget accepted, balance ");
-            exit_print_u(bal);
-            xk_println("");
-        }
-    } else {
-        xk_println("[SHELL] no budget offered by exit");
-    }
-    got = XTOKEN_INVALID;
-    if (g_shell_recv[SHELL_LANE_RD0] != XTOKEN_INVALID &&
-        xtok_accept(g_shell_owner, g_shell_recv[SHELL_LANE_RD0], &got) == 0) {
-        g_shell_rd0 = got;
-        xk_println("[SHELL] disk root rd0 accepted");
-    } else {
-        xk_println("[SHELL] no rd0 root offered");
-    }
-    got = XTOKEN_INVALID;
-    if (g_shell_recv[SHELL_LANE_ND0] != XTOKEN_INVALID &&
-        xtok_accept(g_shell_owner, g_shell_recv[SHELL_LANE_ND0], &got) == 0) {
-        g_shell_nd0 = got;
-        xk_println("[SHELL] disk root nd0 accepted");
-    } else {
-        xk_println("[SHELL] no nd0 root offered");
-    }
-}
-
 
 static void exit_cleanup(UINT32 boot_owner, UINT32 init_owner) {
     XToken list[64];
     XToken keep[6];
     UINT32 nk = 0, n, k, i, progress;
     (void)boot_owner;
-    boot_accept_shell_lanes();
     keep[nk++] = g_exit_root_rd0;
     keep[nk++] = g_exit_root_nd0;
     keep[nk++] = g_exit_budget;
@@ -415,4 +381,40 @@ int stage_volumes(void) {
     }
 
     return 0;
+}
+extern void shell_set_caps(UINT32 owner, XToken bud, XToken rd0, XToken nd0);
+extern int shell_dispatch(const char *cmd, const char *arg);
+extern struct { int pending; char cmd[64]; char arg[200]; XToken bud, rd0, nd0; } g_shell_req;
+
+void exit_launch_shell(void) {
+    if (g_shell_owner == XTOK_OWNER_KERNEL) return;
+    XToken load_bud = XTOKEN_INVALID;
+    if (xtok_budget_mint(g_shell_owner, 256, &load_bud) != 0) return;
+    XAspace as;
+    if (xas_create(&as, g_shell_owner) != XAS_OK) { xtok_release(load_bud); return; }
+    XLoadResult res;
+    if (xload_exb(&as, g_shell_owner, (uint64_t)load_bud, xsh_prog_exb, xsh_prog_exb_len, &res) != XLOAD_OK) {
+        xas_destroy(&as);
+        xtok_release(load_bud);
+        return;
+    }
+    XContext ctx;
+    XProcResult r;
+    xctx_init(&ctx, res.entry, res.stack_top);
+    ctx.rdi = (UINT64)g_shell_recv[0];
+    ctx.rsi = (UINT64)g_shell_recv[1];
+    ctx.rdx = (UINT64)g_shell_recv[2];
+    for (;;) {
+        xproc_run_ctx(&as, &ctx, &r);
+        if (r.reason == XPROC_YIELD && g_shell_req.pending) {
+            g_shell_req.pending = 0;
+            shell_set_caps(g_shell_owner, g_shell_req.bud, g_shell_req.rd0, g_shell_req.nd0);
+            shell_dispatch(g_shell_req.cmd, g_shell_req.arg);
+            continue;
+        }
+        break;
+    }
+    xas_destroy(&as);
+    xtok_release(load_bud);
+    owner_retire(g_shell_owner);
 }
