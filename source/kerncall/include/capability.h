@@ -205,4 +205,7 @@ UINT64 xtok_mem_free_count(void);
 int    xtok_mem_wrap_list(UINT32 owner, const UINT64 *frames, UINT64 n, XToken *out);
 int    xtok_frame_at(XToken tok, UINT64 i, UINT64 *phys);
 
+void xtok_con_register_devs(const void *ser_dev, const void *fb_dev);
+void xtok_con_bind_session(UINT32 owner_id, XToken ser_tok, XToken fb_tok);
+int  xtok_con_authorize(UINT32 owner_id, XToken tok, UINT32 req_rights);
 #endif /* XASMOS_CAPABILITY_H */

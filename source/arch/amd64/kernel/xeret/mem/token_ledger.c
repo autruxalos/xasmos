@@ -1080,3 +1080,44 @@ int xtok_frame_at(XToken tok, UINT64 i, UINT64 *phys) {
     xspin_unlock(&g_lock);
     return rc;
 }
+
+static const void *g_con_ser_dev;
+static const void *g_con_fb_dev;
+static UINT32      g_con_sess_owner;
+static XToken      g_con_sess_ser = XTOKEN_INVALID;
+static XToken      g_con_sess_fb  = XTOKEN_INVALID;
+
+void xtok_con_register_devs(const void *ser_dev, const void *fb_dev) {
+    g_con_ser_dev = ser_dev;
+    g_con_fb_dev  = fb_dev;
+}
+
+void xtok_con_bind_session(UINT32 owner_id, XToken ser_tok, XToken fb_tok) {
+    g_con_sess_owner = owner_id;
+    g_con_sess_ser   = ser_tok;
+    g_con_sess_fb    = fb_tok;
+}
+
+static int con_tok_ok_locked(UINT32 owner_id, XToken tok, UINT32 req_rights) {
+    XTokenEntry *e = lookup_live(tok);
+    if (!e || e->owner_id != owner_id) return -1;
+    if ((e->rights & req_rights) != req_rights) return -1;
+    if (e->kind != XTOK_KIND_BLOCKS) return -1;
+    if (e->dev == 0 || (e->dev != g_con_ser_dev && e->dev != g_con_fb_dev)) return -1;
+    return 0;
+}
+
+int xtok_con_authorize(UINT32 owner_id, XToken tok, UINT32 req_rights) {
+    int rc = -1;
+    xspin_lock(&g_lock);
+    if (tok != XTOKEN_INVALID) {
+        rc = con_tok_ok_locked(owner_id, tok, req_rights);
+    } else if (owner_id != XTOK_OWNER_KERNEL && owner_id == g_con_sess_owner) {
+        if (con_tok_ok_locked(owner_id, g_con_sess_ser, req_rights) == 0 ||
+            con_tok_ok_locked(owner_id, g_con_sess_fb, req_rights) == 0) {
+            rc = 0;
+        }
+    }
+    xspin_unlock(&g_lock);
+    return rc;
+}

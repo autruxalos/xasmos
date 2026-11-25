@@ -96,7 +96,7 @@ CLANG_RES ?= $(if $(wildcard third_party/clang-res/21/include),third_party/clang
 CFLAGS := -target x86_64-unknown-windows -ffreestanding -fshort-wchar \
           -isystem $(CLANG_RES)/include \
           -mno-red-zone -fno-stack-protector -fno-stack-check -Wall -Wextra \
-          -I$(SRC_DIR)/kerncall/include \
+          -I$(SRC_DIR)/kerncall/include -I$(SRC_DIR)/arch/amd64/kernel/xeret/mem \
           -I$(SRC_DIR)/arch/amd64/include \
           -I$(SRC_DIR)/core/xerlibc/include \
           -I$(SRC_DIR)/core/blk \
@@ -176,7 +176,7 @@ HOST_CC  := clang -std=c11 -Wall -Wextra -g $(HOST_SAN)
 HOST_BIN   := build/host
 
 host-tests: $(HOST_BIN)/xtok_blk_test $(HOST_BIN)/xtok_pin_test $(HOST_BIN)/xring_test \
-            $(HOST_BIN)/irqvec_test $(HOST_BIN)/irqvec_mt_test $(HOST_BIN)/xqueue_test $(HOST_BIN)/nvme_xq_test $(HOST_BIN)/nvme_q_test $(HOST_BIN)/xhci_q_test $(HOST_BIN)/usb_msc_q_test $(HOST_BIN)/ahci_q_test $(HOST_BIN)/ide_q_test $(HOST_BIN)/part_md0_test $(HOST_BIN)/nvme_submit_test $(HOST_BIN)/nvme_route_test $(HOST_BIN)/xqueue_mt_test $(HOST_BIN)/nvme_busy_test $(HOST_BIN)/xring_inflight_test $(HOST_BIN)/xring_close_test $(HOST_BIN)/xring_table_test $(HOST_BIN)/xring_reentry_test $(HOST_BIN)/sha512_test $(HOST_BIN)/owner_test $(HOST_BIN)/give_test $(HOST_BIN)/boot_init_test $(HOST_BIN)/derive_call_test $(HOST_BIN)/delegate_test $(HOST_BIN)/endpoint_test $(HOST_BIN)/revoke_test $(HOST_BIN)/budget_test $(HOST_BIN)/exo_full_test $(HOST_BIN)/rd0_memory_test $(HOST_BIN)/exo_sequence_test $(HOST_BIN)/exokernel_system_test
+            $(HOST_BIN)/irqvec_test $(HOST_BIN)/irqvec_mt_test $(HOST_BIN)/xqueue_test $(HOST_BIN)/nvme_xq_test $(HOST_BIN)/nvme_q_test $(HOST_BIN)/xhci_q_test $(HOST_BIN)/usb_msc_q_test $(HOST_BIN)/ahci_q_test $(HOST_BIN)/ide_q_test $(HOST_BIN)/part_md0_test $(HOST_BIN)/con_token_test $(HOST_BIN)/nvme_submit_test $(HOST_BIN)/nvme_route_test $(HOST_BIN)/xqueue_mt_test $(HOST_BIN)/nvme_busy_test $(HOST_BIN)/xring_inflight_test $(HOST_BIN)/xring_close_test $(HOST_BIN)/xring_table_test $(HOST_BIN)/xring_reentry_test $(HOST_BIN)/sha512_test $(HOST_BIN)/owner_test $(HOST_BIN)/give_test $(HOST_BIN)/boot_init_test $(HOST_BIN)/derive_call_test $(HOST_BIN)/delegate_test $(HOST_BIN)/endpoint_test $(HOST_BIN)/revoke_test $(HOST_BIN)/budget_test $(HOST_BIN)/exo_full_test $(HOST_BIN)/rd0_memory_test $(HOST_BIN)/exo_sequence_test $(HOST_BIN)/exokernel_system_test
 	@for t in $^; do echo "== $$t"; ./$$t || exit 1; done
 
 $(HOST_BIN):
@@ -185,7 +185,7 @@ $(HOST_BIN):
 $(HOST_BIN)/xtok_blk_test: $(HOST_BIN) tests/core/xtok/xtok_blk_test.c \
     $(SRC_DIR)/arch/amd64/kernel/xeret/mem/token_ledger.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/owner.c $(SRC_DIR)/core/blk/blk.c \
     $(wildcard tests/core/xtok/stubs/*.h)
-	$(HOST_CC) -Itests/core/xtok/stubs -I$(SRC_DIR)/kerncall/include \
+	$(HOST_CC) -Itests/core/xtok/stubs -I$(SRC_DIR)/kerncall/include -I$(SRC_DIR)/arch/amd64/kernel/xeret/mem \
 	  -I$(SRC_DIR)/arch/amd64/boot/exord/efi -I$(SRC_DIR)/core/blk \
 	  tests/core/xtok/xtok_blk_test.c \
 	  $(SRC_DIR)/arch/amd64/kernel/xeret/mem/token_ledger.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/owner.c $(SRC_DIR)/core/blk/blk.c \
@@ -193,7 +193,7 @@ $(HOST_BIN)/xtok_blk_test: $(HOST_BIN) tests/core/xtok/xtok_blk_test.c \
 
 $(HOST_BIN)/xtok_pin_test: $(HOST_BIN) tests/core/xtok/xtok_pin_test.c tests/core/xtok/host_stubs.c \
     $(SRC_DIR)/arch/amd64/kernel/xeret/mem/token_ledger.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/owner.c $(SRC_DIR)/core/blk/blk.c
-	$(HOST_CC) -Itests/core/xtok/stubs -I$(SRC_DIR)/kerncall/include \
+	$(HOST_CC) -Itests/core/xtok/stubs -I$(SRC_DIR)/kerncall/include -I$(SRC_DIR)/arch/amd64/kernel/xeret/mem \
 	  -I$(SRC_DIR)/arch/amd64/boot/exord/efi -I$(SRC_DIR)/core/blk -Itests/core/xtok \
 	  tests/core/xtok/xtok_pin_test.c tests/core/xtok/host_stubs.c \
 	  $(SRC_DIR)/arch/amd64/kernel/xeret/mem/token_ledger.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/owner.c $(SRC_DIR)/core/blk/blk.c \
@@ -202,7 +202,7 @@ $(HOST_BIN)/xtok_pin_test: $(HOST_BIN) tests/core/xtok/xtok_pin_test.c tests/cor
 $(HOST_BIN)/xring_test: $(HOST_BIN) tests/core/xring/xring_test.c tests/core/xtok/host_stubs.c \
     $(SRC_DIR)/arch/amd64/kernel/xeret/xring.c $(SRC_DIR)/core/xqueue/xqueue.c \
     $(SRC_DIR)/arch/amd64/kernel/xeret/mem/token_ledger.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/owner.c $(SRC_DIR)/core/blk/blk.c
-	$(HOST_CC) -Itests/core/xtok/stubs -I$(SRC_DIR)/kerncall/include \
+	$(HOST_CC) -Itests/core/xtok/stubs -I$(SRC_DIR)/kerncall/include -I$(SRC_DIR)/arch/amd64/kernel/xeret/mem \
 	  -I$(SRC_DIR)/arch/amd64/boot/exord/efi -I$(SRC_DIR)/core/blk \
 	  -I$(SRC_DIR)/core/xqueue -Itests/core/xtok \
 	  tests/core/xring/xring_test.c tests/core/xtok/host_stubs.c \
@@ -228,6 +228,9 @@ $(HOST_BIN)/nvme_xq_test: $(HOST_BIN) tests/core/nvme/nvme_xq_test.c \
 	  tests/core/nvme/nvme_xq_test.c $(SRC_DIR)/arch/amd64/drivers/storage/nvme/nvme_xq.c \
 	  -o $@
 
+$(HOST_BIN)/con_token_test: $(HOST_BIN) tests/core/xtok/con_token_test.c tests/core/xtok/host_stubs.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/token_ledger.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/owner.c $(SRC_DIR)/core/blk/blk.c
+	$(HOST_CC) -Itests/core/xtok/stubs -I$(SRC_DIR)/kerncall/include -I$(SRC_DIR)/arch/amd64/kernel/xeret/mem -I$(SRC_DIR)/arch/amd64/boot/exord/efi -I$(SRC_DIR)/core/blk tests/core/xtok/con_token_test.c tests/core/xtok/host_stubs.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/token_ledger.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/owner.c $(SRC_DIR)/core/blk/blk.c -o $@
+
 $(HOST_BIN)/part_md0_test: $(HOST_BIN) tests/core/blk/part_md0_test.c $(SRC_DIR)/core/blk/blk.c $(SRC_DIR)/core/blk/ramdisk.c $(SRC_DIR)/core/blk/part.c $(SRC_DIR)/core/blk/md0.c
 	$(HOST_CC) -I$(SRC_DIR)/core/blk tests/core/blk/part_md0_test.c $(SRC_DIR)/core/blk/blk.c $(SRC_DIR)/core/blk/ramdisk.c $(SRC_DIR)/core/blk/part.c $(SRC_DIR)/core/blk/md0.c -o $@
 
@@ -251,7 +254,7 @@ $(HOST_BIN)/nvme_q_test: $(HOST_BIN) tests/core/nvme/nvme_q_test.c \
 
 NVME_SRC := $(SRC_DIR)/arch/amd64/drivers/storage/nvme
 NVME_TEST_INC := -I$(NVME_SRC) -I$(SRC_DIR)/arch/amd64/drivers/storage \
-    -I$(SRC_DIR)/arch/amd64/drivers/pci -I$(SRC_DIR)/kerncall/include -I$(SRC_DIR)/arch/amd64/include \
+    -I$(SRC_DIR)/arch/amd64/drivers/pci -I$(SRC_DIR)/kerncall/include -I$(SRC_DIR)/arch/amd64/kernel/xeret/mem -I$(SRC_DIR)/arch/amd64/include \
     -I$(SRC_DIR)/core/xerlibc/include -I$(SRC_DIR)/core/blk -I$(SRC_DIR)/core/dev -I$(SRC_DIR)/core/irq \
     -I$(SRC_DIR)/core/xqueue -I$(SRC_DIR)/arch/amd64/boot/exord/efi -I$(SRC_DIR)/arch/amd64/kernel/xeret \
     -Itests/core/xtok/stubs
@@ -292,7 +295,7 @@ $(HOST_BIN)/nvme_busy_test: $(HOST_BIN) tests/core/nvme/nvme_busy_test.c $(HOST_
 
 $(HOST_BIN)/xring_inflight_test: $(HOST_BIN) tests/core/xring/xring_inflight_test.c \
     $(SRC_DIR)/arch/amd64/kernel/xeret/xring.c tests/core/xtok/host_stubs.c
-	$(HOST_CC) -Itests/core/xtok/stubs -Itests/core/xtok -I$(SRC_DIR)/kerncall/include \
+	$(HOST_CC) -Itests/core/xtok/stubs -Itests/core/xtok -I$(SRC_DIR)/kerncall/include -I$(SRC_DIR)/arch/amd64/kernel/xeret/mem \
 	  -I$(SRC_DIR)/arch/amd64/boot/exord/efi -I$(SRC_DIR)/core/blk -I$(SRC_DIR)/core/xqueue \
 	  tests/core/xring/xring_inflight_test.c tests/core/xtok/host_stubs.c \
 	  $(SRC_DIR)/core/xqueue/xqueue.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/token_ledger.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/owner.c \
@@ -300,7 +303,7 @@ $(HOST_BIN)/xring_inflight_test: $(HOST_BIN) tests/core/xring/xring_inflight_tes
 
 $(HOST_BIN)/xring_close_test: $(HOST_BIN) tests/core/xring/xring_close_test.c \
     $(SRC_DIR)/arch/amd64/kernel/xeret/xring.c tests/core/xtok/host_stubs.c
-	$(HOST_CC) -Itests/core/xtok/stubs -Itests/core/xtok -I$(SRC_DIR)/kerncall/include \
+	$(HOST_CC) -Itests/core/xtok/stubs -Itests/core/xtok -I$(SRC_DIR)/kerncall/include -I$(SRC_DIR)/arch/amd64/kernel/xeret/mem \
 	  -I$(SRC_DIR)/arch/amd64/boot/exord/efi -I$(SRC_DIR)/core/blk -I$(SRC_DIR)/core/xqueue \
 	  tests/core/xring/xring_close_test.c tests/core/xtok/host_stubs.c \
 	  $(SRC_DIR)/core/xqueue/xqueue.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/token_ledger.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/owner.c \
@@ -309,7 +312,7 @@ $(HOST_BIN)/xring_close_test: $(HOST_BIN) tests/core/xring/xring_close_test.c \
 $(HOST_BIN)/xring_table_test: $(HOST_BIN) tests/core/xring/xring_table_test.c \
     $(SRC_DIR)/arch/amd64/kernel/xeret/xring.c $(SRC_DIR)/arch/amd64/kernel/xeret/xring_table.c \
     tests/core/xtok/host_stubs.c
-	$(HOST_CC) -I$(SRC_DIR)/arch/amd64/kernel/xeret/mem -Itests/core/xtok/stubs -Itests/core/xtok -I$(SRC_DIR)/kerncall/include \
+	$(HOST_CC) -I$(SRC_DIR)/arch/amd64/kernel/xeret/mem -Itests/core/xtok/stubs -Itests/core/xtok -I$(SRC_DIR)/kerncall/include -I$(SRC_DIR)/arch/amd64/kernel/xeret/mem \
 	  -I$(SRC_DIR)/arch/amd64/boot/exord/efi -I$(SRC_DIR)/core/blk -I$(SRC_DIR)/core/xqueue \
 	  tests/core/xring/xring_table_test.c tests/core/xtok/host_stubs.c \
 	  $(SRC_DIR)/core/xqueue/xqueue.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/token_ledger.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/owner.c \
@@ -317,7 +320,7 @@ $(HOST_BIN)/xring_table_test: $(HOST_BIN) tests/core/xring/xring_table_test.c \
 
 $(HOST_BIN)/xring_reentry_test: $(HOST_BIN) tests/core/xring/xring_reentry_test.c \
     $(SRC_DIR)/arch/amd64/kernel/xeret/xring.c tests/core/xtok/host_stubs.c
-	$(HOST_CC) -Itests/core/xtok/stubs -Itests/core/xtok -I$(SRC_DIR)/kerncall/include \
+	$(HOST_CC) -Itests/core/xtok/stubs -Itests/core/xtok -I$(SRC_DIR)/kerncall/include -I$(SRC_DIR)/arch/amd64/kernel/xeret/mem \
 	  -I$(SRC_DIR)/arch/amd64/boot/exord/efi -I$(SRC_DIR)/core/blk -I$(SRC_DIR)/core/xqueue \
 	  tests/core/xring/xring_reentry_test.c tests/core/xtok/host_stubs.c \
 	  $(SRC_DIR)/core/xqueue/xqueue.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/token_ledger.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/owner.c \
@@ -329,7 +332,7 @@ $(HOST_BIN)/sha512_test: $(HOST_BIN) tests/core/crypto/sha512_test.c $(SRC_DIR)/
 
 $(HOST_BIN)/owner_test: $(HOST_BIN) tests/core/xtok/owner_test.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/owner.c \
     $(SRC_DIR)/arch/amd64/kernel/xeret/mem/token_ledger.c tests/core/xtok/host_stubs.c
-	$(HOST_CC) -Itests/core/xtok/stubs -Itests/core/xtok -I$(SRC_DIR)/kerncall/include \
+	$(HOST_CC) -Itests/core/xtok/stubs -Itests/core/xtok -I$(SRC_DIR)/kerncall/include -I$(SRC_DIR)/arch/amd64/kernel/xeret/mem \
 	  -I$(SRC_DIR)/arch/amd64/boot/exord/efi -I$(SRC_DIR)/core/blk -I$(SRC_DIR)/arch/amd64/kernel/xeret/mem \
 	  tests/core/xtok/owner_test.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/owner.c \
 	  tests/core/xtok/host_stubs.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/token_ledger.c \
@@ -337,7 +340,7 @@ $(HOST_BIN)/owner_test: $(HOST_BIN) tests/core/xtok/owner_test.c $(SRC_DIR)/arch
 
 $(HOST_BIN)/give_test: $(HOST_BIN) tests/core/xtok/give_test.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/owner.c \
     $(SRC_DIR)/arch/amd64/kernel/xeret/mem/token_ledger.c tests/core/xtok/host_stubs.c
-	$(HOST_CC) -Itests/core/xtok/stubs -Itests/core/xtok -I$(SRC_DIR)/kerncall/include \
+	$(HOST_CC) -Itests/core/xtok/stubs -Itests/core/xtok -I$(SRC_DIR)/kerncall/include -I$(SRC_DIR)/arch/amd64/kernel/xeret/mem \
 	  -I$(SRC_DIR)/arch/amd64/kernel/xeret/mem \
 	  -I$(SRC_DIR)/arch/amd64/boot/exord/efi -I$(SRC_DIR)/core/blk \
 	  tests/core/xtok/give_test.c tests/core/xtok/host_stubs.c \
@@ -347,7 +350,7 @@ $(HOST_BIN)/give_test: $(HOST_BIN) tests/core/xtok/give_test.c $(SRC_DIR)/arch/a
 $(HOST_BIN)/boot_init_test: $(HOST_BIN) tests/core/xtok/boot_init_test.c \
     $(SRC_DIR)/arch/amd64/kernel/xeret/mem/owner.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/token_ledger.c \
     tests/core/xtok/host_stubs.c $(SRC_DIR)/core/blk/blk.c
-	$(HOST_CC) -Itests/core/xtok/stubs -Itests/core/xtok -I$(SRC_DIR)/kerncall/include \
+	$(HOST_CC) -Itests/core/xtok/stubs -Itests/core/xtok -I$(SRC_DIR)/kerncall/include -I$(SRC_DIR)/arch/amd64/kernel/xeret/mem \
 	  -I$(SRC_DIR)/arch/amd64/boot/exord/efi -I$(SRC_DIR)/core/blk \
 	  -I$(SRC_DIR)/arch/amd64/kernel/xeret/mem \
 	  tests/core/xtok/boot_init_test.c tests/core/xtok/host_stubs.c \
@@ -356,27 +359,27 @@ $(HOST_BIN)/boot_init_test: $(HOST_BIN) tests/core/xtok/boot_init_test.c \
 
 $(HOST_BIN)/derive_call_test: $(HOST_BIN) tests/core/xtok/derive_call_test.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/derive_call.c \
     $(SRC_DIR)/arch/amd64/kernel/xeret/mem/owner.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/token_ledger.c tests/core/xtok/host_stubs.c $(SRC_DIR)/core/blk/blk.c
-	$(HOST_CC) -Itests/core/xtok/stubs -Itests/core/xtok -I$(SRC_DIR)/kerncall/include \
+	$(HOST_CC) -Itests/core/xtok/stubs -Itests/core/xtok -I$(SRC_DIR)/kerncall/include -I$(SRC_DIR)/arch/amd64/kernel/xeret/mem \
 	  -I$(SRC_DIR)/arch/amd64/boot/exord/efi -I$(SRC_DIR)/core/blk -I$(SRC_DIR)/arch/amd64/kernel/xeret/mem \
 	  tests/core/xtok/derive_call_test.c tests/core/xtok/host_stubs.c \
 	  $(SRC_DIR)/arch/amd64/kernel/xeret/mem/derive_call.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/owner.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/token_ledger.c $(SRC_DIR)/core/blk/blk.c -o $@
 
 $(HOST_BIN)/delegate_test: $(HOST_BIN) tests/core/xtok/delegate_test.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/derive_call.c \
     $(SRC_DIR)/arch/amd64/kernel/xeret/mem/owner.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/token_ledger.c tests/core/xtok/host_stubs.c $(SRC_DIR)/core/blk/blk.c
-	$(HOST_CC) -Itests/core/xtok/stubs -Itests/core/xtok -I$(SRC_DIR)/kerncall/include \
+	$(HOST_CC) -Itests/core/xtok/stubs -Itests/core/xtok -I$(SRC_DIR)/kerncall/include -I$(SRC_DIR)/arch/amd64/kernel/xeret/mem \
 	  -I$(SRC_DIR)/arch/amd64/boot/exord/efi -I$(SRC_DIR)/core/blk -I$(SRC_DIR)/arch/amd64/kernel/xeret/mem \
 	  tests/core/xtok/delegate_test.c tests/core/xtok/host_stubs.c \
 	  $(SRC_DIR)/arch/amd64/kernel/xeret/mem/derive_call.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/owner.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/token_ledger.c $(SRC_DIR)/core/blk/blk.c -o $@
 
 $(HOST_BIN)/endpoint_test: $(HOST_BIN) tests/core/xtok/endpoint_test.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/endpoint.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/derive_call.c \
     $(SRC_DIR)/arch/amd64/kernel/xeret/mem/owner.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/token_ledger.c tests/core/xtok/host_stubs.c $(SRC_DIR)/core/blk/blk.c
-	$(HOST_CC) -Itests/core/xtok/stubs -Itests/core/xtok -I$(SRC_DIR)/kerncall/include \
+	$(HOST_CC) -Itests/core/xtok/stubs -Itests/core/xtok -I$(SRC_DIR)/kerncall/include -I$(SRC_DIR)/arch/amd64/kernel/xeret/mem \
 	  -I$(SRC_DIR)/arch/amd64/boot/exord/efi -I$(SRC_DIR)/core/blk -I$(SRC_DIR)/arch/amd64/kernel/xeret/mem \
 	  tests/core/xtok/endpoint_test.c tests/core/xtok/host_stubs.c \
 	  $(SRC_DIR)/arch/amd64/kernel/xeret/mem/endpoint.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/derive_call.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/owner.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/token_ledger.c $(SRC_DIR)/core/blk/blk.c -o $@
 
 $(HOST_BIN)/exokernel_system_test: $(HOST_BIN) tests/arch/amd64/exokernel_system_test.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/token_ledger.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/owner.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/endpoint.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/derive_call.c $(SRC_DIR)/arch/amd64/kernel/xeret/xring.c $(SRC_DIR)/arch/amd64/kernel/xeret/xring_table.c $(SRC_DIR)/core/xqueue/xqueue.c $(SRC_DIR)/core/blk/blk.c tests/core/xtok/host_stubs.c
-	$(HOST_CC) -Itests/core/xtok/stubs -Itests/core/xtok -Itests/arch/amd64 -I$(SRC_DIR)/kerncall/include \
+	$(HOST_CC) -Itests/core/xtok/stubs -Itests/core/xtok -Itests/arch/amd64 -I$(SRC_DIR)/kerncall/include -I$(SRC_DIR)/arch/amd64/kernel/xeret/mem \
 	  -I$(SRC_DIR)/arch/amd64/boot/exord/efi -I$(SRC_DIR)/core/blk -I$(SRC_DIR)/core/xqueue \
 	  -I$(SRC_DIR)/arch/amd64/kernel/xeret -I$(SRC_DIR)/arch/amd64/kernel/xeret/mem \
 	  tests/arch/amd64/exokernel_system_test.c tests/core/xtok/host_stubs.c \
@@ -386,7 +389,7 @@ $(HOST_BIN)/exokernel_system_test: $(HOST_BIN) tests/arch/amd64/exokernel_system
 	  $(SRC_DIR)/core/xqueue/xqueue.c $(SRC_DIR)/core/blk/blk.c -o $@
 
 $(HOST_BIN)/exo_sequence_test: $(HOST_BIN) tests/arch/amd64/exo_sequence_test.c tests/arch/amd64/exo_invariants.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/endpoint.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/derive_call.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/owner.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/token_ledger.c tests/core/xtok/host_stubs.c $(SRC_DIR)/core/blk/blk.c
-	$(HOST_CC) -Itests/core/xtok/stubs -Itests/core/xtok -I$(SRC_DIR)/kerncall/include -I$(SRC_DIR)/arch/amd64/boot/exord/efi -I$(SRC_DIR)/core/blk -I$(SRC_DIR)/arch/amd64/kernel/xeret/mem -Itests/arch/amd64 tests/arch/amd64/exo_sequence_test.c tests/arch/amd64/exo_invariants.c tests/core/xtok/host_stubs.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/endpoint.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/derive_call.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/owner.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/token_ledger.c $(SRC_DIR)/core/blk/blk.c -o $@
+	$(HOST_CC) -Itests/core/xtok/stubs -Itests/core/xtok -I$(SRC_DIR)/kerncall/include -I$(SRC_DIR)/arch/amd64/kernel/xeret/mem -I$(SRC_DIR)/arch/amd64/boot/exord/efi -I$(SRC_DIR)/core/blk -I$(SRC_DIR)/arch/amd64/kernel/xeret/mem -Itests/arch/amd64 tests/arch/amd64/exo_sequence_test.c tests/arch/amd64/exo_invariants.c tests/core/xtok/host_stubs.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/endpoint.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/derive_call.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/owner.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/token_ledger.c $(SRC_DIR)/core/blk/blk.c -o $@
 
 exo-check: $(HOST_BIN)/exo_sequence_test $(HOST_BIN)/exokernel_system_test
 	$(HOST_BIN)/exo_sequence_test
@@ -395,27 +398,27 @@ exo-check: $(HOST_BIN)/exo_sequence_test $(HOST_BIN)/exokernel_system_test
 
 $(HOST_BIN)/revoke_test: $(HOST_BIN) tests/arch/amd64/revoke_test.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/endpoint.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/derive_call.c \
     $(SRC_DIR)/arch/amd64/kernel/xeret/mem/owner.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/token_ledger.c tests/core/xtok/host_stubs.c $(SRC_DIR)/core/blk/blk.c
-	$(HOST_CC) -Itests/core/xtok/stubs -Itests/core/xtok -I$(SRC_DIR)/kerncall/include \
+	$(HOST_CC) -Itests/core/xtok/stubs -Itests/core/xtok -I$(SRC_DIR)/kerncall/include -I$(SRC_DIR)/arch/amd64/kernel/xeret/mem \
 	  -I$(SRC_DIR)/arch/amd64/boot/exord/efi -I$(SRC_DIR)/core/blk -I$(SRC_DIR)/arch/amd64/kernel/xeret/mem \
 	  tests/arch/amd64/revoke_test.c tests/core/xtok/host_stubs.c \
 	  $(SRC_DIR)/arch/amd64/kernel/xeret/mem/endpoint.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/derive_call.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/owner.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/token_ledger.c $(SRC_DIR)/core/blk/blk.c -o $@
 
 $(HOST_BIN)/budget_test: $(HOST_BIN) tests/arch/amd64/budget_test.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/budget.h $(SRC_DIR)/arch/amd64/kernel/xeret/mem/endpoint.c \
     $(SRC_DIR)/arch/amd64/kernel/xeret/mem/derive_call.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/owner.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/token_ledger.c tests/core/xtok/host_stubs.c $(SRC_DIR)/core/blk/blk.c
-	$(HOST_CC) -Itests/core/xtok/stubs -Itests/core/xtok -I$(SRC_DIR)/kerncall/include \
+	$(HOST_CC) -Itests/core/xtok/stubs -Itests/core/xtok -I$(SRC_DIR)/kerncall/include -I$(SRC_DIR)/arch/amd64/kernel/xeret/mem \
 	  -I$(SRC_DIR)/arch/amd64/boot/exord/efi -I$(SRC_DIR)/core/blk -I$(SRC_DIR)/arch/amd64/kernel/xeret/mem \
 	  tests/arch/amd64/budget_test.c tests/core/xtok/host_stubs.c \
 	  $(SRC_DIR)/arch/amd64/kernel/xeret/mem/endpoint.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/derive_call.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/owner.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/token_ledger.c $(SRC_DIR)/core/blk/blk.c -o $@
 
 $(HOST_BIN)/rd0_memory_test: $(HOST_BIN) tests/arch/amd64/rd0_memory_test.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/endpoint.c \
     $(SRC_DIR)/arch/amd64/kernel/xeret/mem/derive_call.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/owner.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/token_ledger.c tests/core/xtok/host_stubs.c $(SRC_DIR)/core/blk/blk.c
-	$(HOST_CC) -Itests/core/xtok/stubs -Itests/core/xtok -I$(SRC_DIR)/kerncall/include \
+	$(HOST_CC) -Itests/core/xtok/stubs -Itests/core/xtok -I$(SRC_DIR)/kerncall/include -I$(SRC_DIR)/arch/amd64/kernel/xeret/mem \
 	  -I$(SRC_DIR)/arch/amd64/boot/exord/efi -I$(SRC_DIR)/core/blk -I$(SRC_DIR)/arch/amd64/kernel/xeret/mem \
 	  tests/arch/amd64/rd0_memory_test.c tests/core/xtok/host_stubs.c \
 	  $(SRC_DIR)/arch/amd64/kernel/xeret/mem/endpoint.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/derive_call.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/owner.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/token_ledger.c $(SRC_DIR)/core/blk/blk.c -o $@
 
 $(HOST_BIN)/exo_full_test: $(HOST_BIN) tests/arch/amd64/exo_full_test.c tests/arch/amd64/exo_invariants.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/token_ledger.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/owner.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/endpoint.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/derive_call.c $(SRC_DIR)/core/xqueue/xqueue.c $(SRC_DIR)/core/blk/blk.c tests/core/xtok/host_stubs.c
-	$(HOST_CC) -Itests/core/xtok/stubs -Itests/core/xtok -Itests/arch/amd64 -I$(SRC_DIR)/kerncall/include \
+	$(HOST_CC) -Itests/core/xtok/stubs -Itests/core/xtok -Itests/arch/amd64 -I$(SRC_DIR)/kerncall/include -I$(SRC_DIR)/arch/amd64/kernel/xeret/mem \
 	  -I$(SRC_DIR)/arch/amd64/boot/exord/efi -I$(SRC_DIR)/core/blk -I$(SRC_DIR)/core/xqueue -I$(SRC_DIR)/arch/amd64/kernel/xeret -I$(SRC_DIR)/arch/amd64/kernel/xeret/mem \
 	  tests/arch/amd64/exo_full_test.c tests/arch/amd64/exo_invariants.c tests/core/xtok/host_stubs.c \
 	  $(SRC_DIR)/arch/amd64/kernel/xeret/mem/token_ledger.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/owner.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/endpoint.c $(SRC_DIR)/arch/amd64/kernel/xeret/mem/derive_call.c $(SRC_DIR)/core/xqueue/xqueue.c $(SRC_DIR)/core/blk/blk.c -o $@

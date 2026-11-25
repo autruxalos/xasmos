@@ -158,6 +158,18 @@ static void boot_hand_budget(UINT32 boot_owner, UINT32 init_owner) {
 
 /* Claims a disk root for the boot owner and hands it to init. The boot keeps
  * nothing: the give moves the token, it does not copy it. Returns the handle. */
+static int ser0_read(void *ctx, uint64_t lba, uint32_t count, void *buf) { (void)ctx; (void)lba; (void)count; (void)buf; return BLK_OK; }
+static int ser0_write(void *ctx, uint64_t lba, uint32_t count, const void *buf) {
+    (void)ctx; (void)lba; const char *s = (const char *)buf;
+    for (uint32_t i = 0; i < count; i++) { char c[2] = { s[i], 0 }; xk_print(c); }
+    return BLK_OK;
+}
+static int ser0_flush(void *ctx) { (void)ctx; return BLK_OK; }
+static const BlkOps g_ser0_ops = { ser0_read, ser0_write, ser0_flush, 0 };
+static BlkDev g_ser0_dev = { 0, &g_ser0_ops, 1u, 1024ULL };
+static const BlkOps g_fb0_ops = { ser0_read, ser0_write, ser0_flush, 0 };
+static BlkDev g_fb0_dev = { 0, &g_fb0_ops, 4096u, 512ULL };
+
 static XToken boot_hand_root(BlkDev *d, const char *name, UINT32 boot_owner, UINT32 init_owner) {
     XToken t = xtok_root_claim(d, boot_owner);
     xk_print("[BOOT] root ");
@@ -344,12 +356,24 @@ int stage_volumes(void) {
         BlkDev *rd = dev_lookup("|dev|rd0");
         BlkDev *nd = dev_lookup("|dev|nd0");
         xtok_roots_reset();
+        dev_register("|dev|ser0", &g_ser0_dev);
+        dev_register("|dev|fb0",  &g_fb0_dev);
+        xtok_con_register_devs(&g_ser0_dev, &g_fb0_dev);
         if (rd) xtok_root_mint(rd, boot_owner);
         if (nd) xtok_root_mint(nd, boot_owner);
+        xtok_root_mint(&g_ser0_dev, boot_owner);
+        xtok_root_mint(&g_fb0_dev,  boot_owner);
         if (rd) g_exit_root_rd0 = boot_hand_root(rd, "rd0", boot_owner, init_owner);
         if (nd) g_exit_root_nd0 = boot_hand_root(nd, "nd0", boot_owner, init_owner);
+        XToken init_ser0 = boot_hand_root(&g_ser0_dev, "ser0", boot_owner, init_owner);
+        XToken init_fb0  = boot_hand_root(&g_fb0_dev,  "fb0",  boot_owner, init_owner);
         boot_hand_budget(boot_owner, init_owner);
         boot_shell_endpoint(init_owner);
+        XToken sh_ser0 = (init_ser0 != XTOKEN_INVALID) ? xtok_derive_blocks(init_owner, init_ser0, 0ULL, 1024ULL, XTOK_RIGHT_READ | XTOK_RIGHT_WRITE | XTOK_RIGHT_GIVE) : XTOKEN_INVALID;
+        if (sh_ser0 != XTOKEN_INVALID) xtok_give(init_owner, sh_ser0, g_shell_owner);
+        XToken sh_fb0  = (init_fb0 != XTOKEN_INVALID) ? xtok_derive_blocks(init_owner, init_fb0, 0ULL, 512ULL, XTOK_RIGHT_WRITE | XTOK_RIGHT_MAP | XTOK_RIGHT_GIVE) : XTOKEN_INVALID;
+        if (sh_fb0 != XTOKEN_INVALID) xtok_give(init_owner, sh_fb0, g_shell_owner);
+        xtok_con_bind_session(g_shell_owner, sh_ser0, sh_fb0);
         exit_launch(boot_owner, init_owner);
     }
 
