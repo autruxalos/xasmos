@@ -269,7 +269,7 @@ static void exit_launch(UINT32 boot_owner, UINT32 init_owner) {
         exit_cleanup(boot_owner, init_owner);
         return;
     }
-    lrc = xload_exb(&as, init_owner, exit_prog_exb, exit_prog_exb_len, &res);
+    lrc = xload_exb(&as, init_owner, (uint64_t)g_exit_budget, exit_prog_exb, exit_prog_exb_len, &res);
     if (lrc != XLOAD_OK) {
         xk_print("[EXIT] exit: load failed, code ");
         exit_print_u((UINT64)(-lrc));

@@ -51,7 +51,7 @@ typedef struct {
 /* Loads a validated .exb image into `as` for owner `owner`.
  * `image` is `size` bytes of untrusted data; the loader copies from it and
  * never keeps a pointer to it. Returns XLOAD_OK or a negative XLOAD_E_*. */
-int xload_exb(XAspace *as, uint32_t owner, const void *image, uint64_t size,
+int xload_exb(XAspace *as, uint32_t owner, uint64_t budget, const void *image, uint64_t size,
               XLoadResult *out);
 
 #endif /* XASMOS_XLOAD_H */

@@ -12,6 +12,8 @@
 #include "paging.h"
 #include "xproc.h"
 #include "xload.h"
+#include "../../../../../source/arch/amd64/kernel/xeret/mem/budget.h"
+#include "../../../../../source/arch/amd64/kernel/xeret/mem/budget.h"
 #include "xload_backend.h"
 #include "diag.h"
 #include "prog_exb.h"
@@ -71,7 +73,7 @@ void kernel_main(XeretHandoff *hand) {
 
     /* ---- 1. load prog.exb and run it ---- */
     check(xas_create(&as, 1) == XAS_OK, "owner 1: address space created");
-    rc = xload_exb(&as, 1, prog_exb, prog_exb_len, &res);
+    rc = xload_exb(&as, 1, (uint64_t)bud1, (uint64_t)bud1, prog_exb, prog_exb_len, &res);
     check(rc == XLOAD_OK, "owner 1: prog.exb loads");
     check(res.entry == 0x8000000000ULL, "entry is the image entry point");
     check(res.stack_top == XLB_USER_TOP - XLB_PAGE, "stack top sits below the guard page");
@@ -93,7 +95,7 @@ void kernel_main(XeretHandoff *hand) {
 
     /* ---- 3. the same image loads and runs again after a reap ---- */
     check(xas_create(&as, 1) == XAS_OK, "second address space created");
-    rc = xload_exb(&as, 1, prog_exb, prog_exb_len, &res);
+    rc = xload_exb(&as, 1, (uint64_t)bud1, (uint64_t)bud1, prog_exb, prog_exb_len, &res);
     check(rc == XLOAD_OK, "second load succeeds: the frames were really reused");
     xctx_init(&ctx, res.entry, res.stack_top);
     run = xproc_run_ctx(&as, &ctx, &R);
@@ -105,7 +107,7 @@ void kernel_main(XeretHandoff *hand) {
     xproc_set_quota(2, 1, 256);       /* one frame: the image needs more */
     check(xas_create(&as, 2) == XAS_OK, "owner 2: address space created");
     before = phys_free_count();
-    rc = xload_exb(&as, 2, prog_exb, prog_exb_len, &res);
+    rc = xload_exb(&as, 2, (uint64_t)bud2, (uint64_t)bud2, prog_exb, prog_exb_len, &res);
     check(rc == XLOAD_E_QUOTA, "owner 2: quota refuses the image");
     check(phys_free_count() == before, "quota refusal takes no frames");
     check(xtok_live_count() == 0, "quota refusal leaves no token");
@@ -118,7 +120,7 @@ void kernel_main(XeretHandoff *hand) {
     bad_image[0] ^= 0xFF;             /* break the magic */
     check(xas_create(&as, 1) == XAS_OK, "owner 1: address space for the corrupt test");
     before = phys_free_count();
-    rc = xload_exb(&as, 1, bad_image, prog_exb_len, &res);
+    rc = xload_exb(&as, 1, (uint64_t)bud1, (uint64_t)bud1, bad_image, prog_exb_len, &res);
     check(rc == XLOAD_E_IMAGE, "corrupt image is refused as XLOAD_E_IMAGE");
     check(phys_free_count() == before, "corrupt image takes no frames");
     check(xtok_live_count() == 0, "corrupt image leaves no token");

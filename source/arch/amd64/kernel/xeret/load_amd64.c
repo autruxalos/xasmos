@@ -8,6 +8,8 @@
 #include <stdint.h>
 #include "efi_types.h"
 #include "capability.h"
+#include "mem/budget.h"
+#include "mem/budget.h"
 #include "paging.h"
 #include "xload.h"
 #include "xload_backend.h"
@@ -19,21 +21,25 @@ extern void xproc_quota_get(UINT32 owner, UINT64 *max_frames, UINT32 *max_tokens
 _Static_assert(XLB_PERM_R == XPERM_R && XLB_PERM_W == XPERM_W && XLB_PERM_X == XPERM_X,
                "XLB_PERM_* must match XPERM_*");
 
-int xlb_quota_ok(uint32_t owner, uint64_t frames, uint32_t tokens) {
+int xlb_quota_ok(uint32_t owner, uint64_t budget, uint64_t frames, uint32_t tokens) {
     UINT64 max_frames, used_frames;
     UINT32 max_tokens, used_tokens;
 
+    UINT64 bal = 0;
+    if (xtok_budget_balance((XToken)budget, owner, &bal) != 0 || frames > bal) return 0;
+    if (xtok_budget_balance((XToken)budget, owner, &bal) != 0 || frames > bal) return 0;
     xproc_quota_get(owner, &max_frames, &max_tokens);
     xtok_owner_usage(owner, &used_frames, &used_tokens);
 
     if (used_frames > max_frames || used_tokens > max_tokens) return 0;
-    if (frames > max_frames - used_frames) return 0;   /* no overflow: used <= max */
+    /* frames checked against budget */   /* no overflow: used <= max */
     if (tokens > max_tokens - used_tokens) return 0;
     return 1;
 }
 
-int xlb_alloc(uint32_t owner, uint64_t frames, uint32_t rights, uint64_t *token) {
-    XToken t = xtok_alloc_ram(owner, frames, rights);   /* frames come zeroed */
+int xlb_alloc(uint32_t owner, uint64_t budget, uint64_t frames, uint32_t rights, uint64_t *token) {
+    XToken t = XTOKEN_INVALID;
+    if (xtok_alloc_ram_from(owner, (XToken)budget, frames, rights, &t) != 0) return XLOAD_E_NOMEM;   /* frames come zeroed */
     if (t == XTOKEN_INVALID) return XLOAD_E_NOMEM;
     *token = t;
     return 0;

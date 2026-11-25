@@ -132,9 +132,12 @@ int cmd_run_main(const char *name) {
        return -1;
    }
 
-   XLoadResult res;
-   int rc = xload_exb(&as, owner, img->data, img->len, &res);
+   XToken bud = lend_budget(owner);
+    XLoadResult res;
+   int rc = xload_exb(&as, owner, (uint64_t)bud, img->data, img->len, &res);
    if (rc != XLOAD_OK) {
+        if (bud != XTOKEN_INVALID) xtok_release(bud);
+        if (bud != XTOKEN_INVALID) xtok_release(bud);
        xk_print("EXBADIMAGE: load failed, code ");
        put_dec((unsigned long long)(-rc));
        xk_println("");
@@ -146,7 +149,7 @@ int cmd_run_main(const char *name) {
    XContext ctx;
    XProcResult r;
    xctx_init(&ctx, res.entry, res.stack_top);
-   ctx.rdx = (UINT64)lend_budget(owner);
+   ctx.rdx = (UINT64)bud;
    ctx.rcx = (UINT64)lend_disk(owner, name);
 
    if (xproc_set_quantum_ms(RUN_SLICE_MS) != 0) {
