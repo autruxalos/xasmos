@@ -121,6 +121,7 @@ static void test_ids_are_distinct_and_start_at_one(void) {
 
 static void test_entry_limits(void) {
     fresh();
+XToken t = XTOKEN_INVALID;
     CHECK(xrt_create(OWNER, budget_for(OWNER), 0,   &t) == XRT_E_ARG);  /* zero */
     CHECK(xrt_create(OWNER, budget_for(OWNER), 15,  &t) == XRT_E_ARG);  /* below minimum */
     CHECK(xrt_create(OWNER, budget_for(OWNER), 17,  &t) == XRT_E_ARG);  /* not a power of two */
@@ -153,7 +154,7 @@ static void test_zero_cap_by_default(void) {
 
 static void test_foreign_token_is_refused(void) {
     fresh();
-    int id = xrt_create(OWNER, budget_for(OWNER), 16, &t);
+    XToken t = XTOKEN_INVALID; int id = xrt_create(OWNER, budget_for(OWNER), 16, &t);
     CHECK(id > 0);
     CHECK(xrt_destroy(OTHER, t) == -1);
     CHECK(xrt_ring((uint32_t)id)->closing == 0);
@@ -165,7 +166,7 @@ static void test_foreign_token_is_refused(void) {
 
 static void test_free_refused_while_alive(void) {
     fresh();
-    int id = xrt_create(OWNER, budget_for(OWNER), 16, &t);
+    XToken t = XTOKEN_INVALID; int id = xrt_create(OWNER, budget_for(OWNER), 16, &t);
     CHECK(id > 0);
     CHECK(xtok_release(t) == XTOK_REL_EBUSY);        /* the table's retention */
     CHECK(xtok_ram_info(t, 0, 0) == 0);
@@ -229,7 +230,7 @@ static void test_cap_returns_on_release(void) {
 
 static void test_lookup_is_owner_checked(void) {
     fresh();
-    int id = xrt_create(OWNER, budget_for(OWNER), 16, &t);
+    XToken t = XTOKEN_INVALID; int id = xrt_create(OWNER, budget_for(OWNER), 16, &t);
     CHECK(id > 0);
     CHECK(xrt_lookup(OWNER, t) == id);
     CHECK(xrt_lookup(OTHER, t) == -1);                /* foreign owner: same answer as unknown */
@@ -341,7 +342,7 @@ static void test_bind_refusal_leaves_nothing(void) {
     UINT64 f0 = 0; UINT32 t0 = 0;
     xtok_owner_usage(OWNER, &f0, &t0);
     bind_fail = 1;
-    CHECK(xrt_create(OWNER, bud, 16, &t) == XRT_E_NOMEM);
+    XToken t = XTOKEN_INVALID; CHECK(xrt_create(OWNER, bud, 16, &t) == XRT_E_NOMEM);
     CHECK(t == XTOKEN_INVALID);
     CHECK(xrt_owner_count(OWNER) == 0);
     UINT64 f1 = 0; UINT32 t1 = 0;

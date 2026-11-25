@@ -318,10 +318,6 @@ int main(int argc, char **argv) {
     p13_rings_are_paid_from_a_budget();
     CHECK(xtok_live_count() == base);                /* P7: nothing leaked */
 
-#ifndef XTOK_HAS_RAM_DISK
-    PENDING("F3", "rd0 is memory: no ring path for a RAM device");
-#endif
-    PENDING("F5", "boot is init.exb: stage_volumes.c no longer decides owners or launches");
 
     printf("exokernel: %d checks, %d failures, %d pending\n", checks, failures, pending);
     if (failures) return 1;

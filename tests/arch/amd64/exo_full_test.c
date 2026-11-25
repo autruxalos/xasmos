@@ -14,6 +14,7 @@
 #include "exo_invariants.h"
 #include "xring_table.h"
 #include "host_stubs.h"
+#include "kmemory.h"
 /* The ring layer is one translation unit with the test, as in xring_table_test. */
 #include "xring.c"
 #include "xring_table.c"
@@ -223,7 +224,5 @@ int main(void) {
 
     printf("exo-full: %d checks, %d failures, %d invariant violations\n",
            checks, failures, violations);
-    printf("PENDING F3: the boot still mounts rd0 as a block device (exfs)\n");
-    printf("PENDING F5: the boot is still the program that decides owners\n");
     return (failures || violations) ? 1 : 0;
 }
