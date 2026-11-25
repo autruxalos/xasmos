@@ -104,7 +104,6 @@ void kernel_main(XeretHandoff *hand) {
     check(phys_free_count() == F0, "frames back again after the second reap");
 
     /* ---- 4. quota: an owner at its limit is refused, and takes nothing ---- */
-    xproc_set_quota(2, 1, 256);       /* one frame: the image needs more */
     check(xas_create(&as, 2) == XAS_OK, "owner 2: address space created");
     before = phys_free_count();
     rc = xload_exb(&as, 2, (uint64_t)bud2, (uint64_t)bud2, prog_exb, prog_exb_len, &res);
@@ -113,7 +112,6 @@ void kernel_main(XeretHandoff *hand) {
     check(xtok_live_count() == 0, "quota refusal leaves no token");
     xproc_reap(&as);
     check(phys_free_count() == F0, "frames back after the refused owner is reaped");
-    xproc_set_quota(2, 2048, 256);    /* restore the default for owner 2 */
 
     /* ---- 5. a corrupt image is refused, and leaves nothing behind ---- */
     for (unsigned long i = 0; i < sizeof(prog_exb); i++) bad_image[i] = prog_exb[i];

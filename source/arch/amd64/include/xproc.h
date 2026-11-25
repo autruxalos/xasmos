@@ -39,9 +39,7 @@
 #define XSYS_TABLE_SIZE 32u
 
 #define XINFO_FRAMES_USED   0u
-#define XINFO_FRAMES_LIMIT  1u
 #define XINFO_TOKENS_USED   2u
-#define XINFO_TOKENS_LIMIT  3u
 
 /* Rights a process may ask for. DMA is deliberately absent: only the kernel
  * hands out device-facing memory. */
@@ -105,7 +103,6 @@ int  xproc_run(XAspace *as, UINT64 entry, UINT64 user_rsp, XProcResult *res);
 
 /* Per-owner limits on frames and tokens (owner < 64; others use the default
  * of 2048 frames / 256 tokens). Kernel-minted tokens count too. */
-int    xproc_set_quota(UINT32 owner, UINT64 max_frames, UINT32 max_tokens);
 
 /* Process teardown. Revokes every mapping of every token the owner holds,
  * reclaims those tokens (whether or not they carry RELEASE), and destroys

@@ -30,33 +30,6 @@
 #include "mem/budget.h"
 #define XOWNER_TABLE (XOWNER_FIRST_INSTANCE + XOWNER_MAX)
 
-typedef struct {
-    UINT64 frames;
-    UINT32 tokens;
-    UINT32 set;
-} Quota;
-
-static Quota  g_quota[XOWNER_TABLE];
-static UINT64 g_def_frames = 2048;     /* 8 MiB */
-static UINT32 g_def_tokens = 256;
-
-int xproc_set_quota(UINT32 owner, UINT64 max_frames, UINT32 max_tokens) {
-    if (owner == XTOK_OWNER_KERNEL || owner >= XOWNER_TABLE) return -1;
-    g_quota[owner].frames = max_frames;
-    g_quota[owner].tokens = max_tokens;
-    g_quota[owner].set    = 1;
-    return 0;
-}
-
-static void quota_of(UINT32 owner, UINT64 *frames, UINT32 *tokens) {
-    if (owner < XOWNER_TABLE && g_quota[owner].set) {
-        *frames = g_quota[owner].frames;
-        *tokens = g_quota[owner].tokens;
-    } else {
-        *frames = g_def_frames;
-        *tokens = g_def_tokens;
-    }
-}
 
 static void ret(ExcFrame *f, long long code) {
     f->rax = (unsigned long long)code;
@@ -86,15 +59,6 @@ static void sys_alloc(XAspace *as, ExcFrame *f) {
     if (n == 0 || rights == 0)                { ret(f, XERR_INVAL); return; }
     if (rights & ~(UINT64)XSYS_USER_RIGHTS)   { ret(f, XERR_PERM);  return; }
 
-    UINT64 max_frames, used_frames;
-    UINT32 max_tokens, used_tokens;
-    quota_of(as->owner_id, &max_frames, &max_tokens);
-    xtok_owner_usage(as->owner_id, &used_frames, &used_tokens);
-
-    /* Compare without ever multiplying or adding past 64 bits. */
-    if (used_tokens >= max_tokens)                          { ret(f, XERR_NOMEM); return; }
-    if (n > max_frames || used_frames > max_frames - n)     { ret(f, XERR_NOMEM); return; }
-
     XToken tok = xtok_alloc_ram(as->owner_id, n, (UINT32)rights);
     if (tok == XTOKEN_INVALID)                { ret(f, XERR_NOMEM); return; }
 
@@ -122,16 +86,13 @@ static void sys_free(XAspace *as, ExcFrame *f) {
 }
 
 static void sys_info(XAspace *as, ExcFrame *f) {
-    UINT64 max_frames, used_frames;
-    UINT32 max_tokens, used_tokens;
-    quota_of(as->owner_id, &max_frames, &max_tokens);
+    UINT64 used_frames;
+    UINT32 used_tokens;
     xtok_owner_usage(as->owner_id, &used_frames, &used_tokens);
 
     switch (f->rdi) {
     case XINFO_FRAMES_USED:  f->rax = used_frames;  break;
-    case XINFO_FRAMES_LIMIT: f->rax = max_frames;   break;
     case XINFO_TOKENS_USED:  f->rax = used_tokens;  break;
-    case XINFO_TOKENS_LIMIT: f->rax = max_tokens;   break;
     default:                 ret(f, XERR_INVAL);    break;
     }
 }
@@ -304,8 +265,3 @@ UINT32 xproc_reap(XAspace *as) {
     return total;
 }
 
-/* Exported for the loader backend (load_amd64.c): the limits that
- * xproc_set_quota and the defaults give to an owner. Read-only. */
-void xproc_quota_get(UINT32 owner, UINT64 *max_frames, UINT32 *max_tokens) {
-    quota_of(owner, max_frames, max_tokens);
-}
