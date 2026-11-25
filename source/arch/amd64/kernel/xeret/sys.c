@@ -50,22 +50,6 @@ static long long map_xas_err(int rc) {
     default:              return XERR_INVAL;
     }
 }
-
-static void sys_alloc(XAspace *as, ExcFrame *f) {
-    UINT64 n      = f->rdi;
-    UINT64 rights = f->rsi;
-    f->rdx = 0;                                     /* never leave kernel bytes behind */
-
-    if (n == 0 || rights == 0)                { ret(f, XERR_INVAL); return; }
-    if (rights & ~(UINT64)XSYS_USER_RIGHTS)   { ret(f, XERR_PERM);  return; }
-
-    XToken tok = xtok_alloc_ram(as->owner_id, n, (UINT32)rights);
-    if (tok == XTOKEN_INVALID)                { ret(f, XERR_NOMEM); return; }
-
-    f->rdx = tok;
-    ret(f, 0);
-}
-
 static void sys_map(XAspace *as, ExcFrame *f) {
     if (f->rdx > 0xFFFFFFFFULL)  { ret(f, XERR_INVAL); return; }
     ret(f, map_xas_err(xas_map(as, f->rsi, f->rdi, (UINT32)f->rdx)));
@@ -210,7 +194,6 @@ static void sys_derive(XAspace *as, ExcFrame *f) {
 typedef void (*XsysHandler)(XAspace *as, ExcFrame *f);
 
 static const XsysHandler g_xsys_table[XSYS_TABLE_SIZE] = {
-    [XSYS_ALLOC]          = sys_alloc,
     [XSYS_MAP]            = sys_map,
     [XSYS_UNMAP]          = sys_unmap,
     [XSYS_FREE]           = sys_free,
