@@ -25,6 +25,7 @@
 #include "xhci.h"
 #include "usb_msc.h"
 #include "ahci.h"
+#include "ide.h"
 #include "stage_volumes.h"
 #include "kmemory.h"
 #include "pci.h"
@@ -397,6 +398,21 @@ int stage_volumes(void) {
             xk_println("");
         } else {
             xk_print("[AHCI] init rc="); report_hex((UINT64)(UINT32)(-arc), 2); xk_println("");
+        }
+    }
+    {
+        IdeInfo ii;
+        int irc = ide_probe_and_init(&ii);
+        if (irc == 0) {
+            uint8_t s0[512];
+            int rrc = blk_read(storage_ide_device(), 0ULL, 1u, s0);
+            xk_print("[IDE] base="); report_hex((UINT64)ii.cmd_base, 4);
+            xk_print(" sectors="); report_hex(ii.sectors, 4);
+            xk_print(" model="); xk_print(ii.model);
+            if (rrc == BLK_OK) { char sig[5] = {(char)s0[0],(char)s0[1],(char)s0[2],(char)s0[3],0}; xk_print(" sig="); xk_print(sig); }
+            xk_println("");
+        } else {
+            xk_print("[IDE] init rc="); report_hex((UINT64)(UINT32)(-irc), 2); xk_println("");
         }
     }
     /* Program ring table: the boot sets the policy, programs never do.

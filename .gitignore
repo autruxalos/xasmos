@@ -6,3 +6,4 @@ build/
 *.core
 xasmos_usb.img
 xasmos_sata.img
+xasmos_ide.img
