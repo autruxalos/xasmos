@@ -4,3 +4,4 @@ build/
 build/
 *.img
 *.core
+xasmos_usb.img

@@ -64,6 +64,8 @@ SRCS := \
         arch/amd64/drivers/storage/nvme/nvme_xq.c \
         arch/amd64/drivers/storage/nvme/nvme_q.c \
         arch/amd64/drivers/storage/storage.c \
+	arch/amd64/drivers/usb/xhci/xhci_q.c \
+	arch/amd64/drivers/usb/xhci/xhci.c \
         arch/amd64/syslib/core/path.c \
         core/xerlibc/src/mem.c \
         core/xerlibc/src/str.c \
@@ -99,6 +101,7 @@ CFLAGS := -target x86_64-unknown-windows -ffreestanding -fshort-wchar \
           -I$(SRC_DIR)/arch/amd64/init/exit \
           -I$(SRC_DIR)/arch/amd64/drivers/storage \
           -I$(SRC_DIR)/arch/amd64/drivers/pci \
+	-I$(SRC_DIR)/arch/amd64/drivers/usb/xhci \
           -I$(SRC_DIR)/arch/amd64/apps/xsh/utils \
           -I$(SRC_DIR)/arch/amd64/apps/xsh/images
 
@@ -148,6 +151,8 @@ qemu: $(IMG) $(DISK) $(BUILD)/OVMF_VARS.fd
 	  -drive format=raw,file=$(IMG) \
 	  -drive file=$(DISK),format=raw,if=none,id=nvm \
 	  -device nvme,drive=nvm,serial=xasmos \
+	-device qemu-xhci,id=xhci \
+	-drive if=none,id=usb0,format=raw,file=xasmos_usb.img -device usb-storage,bus=xhci.0,drive=usb0 \
 	  -serial stdio
 
 # Host tests for the portable modules and the kernel-side ring logic.
@@ -156,7 +161,7 @@ HOST_CC  := clang -std=c11 -Wall -Wextra -g $(HOST_SAN)
 HOST_BIN   := build/host
 
 host-tests: $(HOST_BIN)/xtok_blk_test $(HOST_BIN)/xtok_pin_test $(HOST_BIN)/xring_test \
-            $(HOST_BIN)/irqvec_test $(HOST_BIN)/irqvec_mt_test $(HOST_BIN)/xqueue_test $(HOST_BIN)/nvme_xq_test $(HOST_BIN)/nvme_q_test $(HOST_BIN)/nvme_submit_test $(HOST_BIN)/nvme_route_test $(HOST_BIN)/xqueue_mt_test $(HOST_BIN)/nvme_busy_test $(HOST_BIN)/xring_inflight_test $(HOST_BIN)/xring_close_test $(HOST_BIN)/xring_table_test $(HOST_BIN)/xring_reentry_test $(HOST_BIN)/sha512_test $(HOST_BIN)/owner_test $(HOST_BIN)/give_test $(HOST_BIN)/boot_init_test $(HOST_BIN)/derive_call_test $(HOST_BIN)/delegate_test $(HOST_BIN)/endpoint_test $(HOST_BIN)/revoke_test $(HOST_BIN)/budget_test $(HOST_BIN)/exo_full_test $(HOST_BIN)/rd0_memory_test $(HOST_BIN)/exo_sequence_test $(HOST_BIN)/exokernel_system_test
+            $(HOST_BIN)/irqvec_test $(HOST_BIN)/irqvec_mt_test $(HOST_BIN)/xqueue_test $(HOST_BIN)/nvme_xq_test $(HOST_BIN)/nvme_q_test $(HOST_BIN)/xhci_q_test $(HOST_BIN)/nvme_submit_test $(HOST_BIN)/nvme_route_test $(HOST_BIN)/xqueue_mt_test $(HOST_BIN)/nvme_busy_test $(HOST_BIN)/xring_inflight_test $(HOST_BIN)/xring_close_test $(HOST_BIN)/xring_table_test $(HOST_BIN)/xring_reentry_test $(HOST_BIN)/sha512_test $(HOST_BIN)/owner_test $(HOST_BIN)/give_test $(HOST_BIN)/boot_init_test $(HOST_BIN)/derive_call_test $(HOST_BIN)/delegate_test $(HOST_BIN)/endpoint_test $(HOST_BIN)/revoke_test $(HOST_BIN)/budget_test $(HOST_BIN)/exo_full_test $(HOST_BIN)/rd0_memory_test $(HOST_BIN)/exo_sequence_test $(HOST_BIN)/exokernel_system_test
 	@for t in $^; do echo "== $$t"; ./$$t || exit 1; done
 
 $(HOST_BIN):
@@ -207,6 +212,9 @@ $(HOST_BIN)/nvme_xq_test: $(HOST_BIN) tests/core/nvme/nvme_xq_test.c \
 	$(HOST_CC) -I$(SRC_DIR)/arch/amd64/drivers/storage/nvme -I$(SRC_DIR)/core/xqueue \
 	  tests/core/nvme/nvme_xq_test.c $(SRC_DIR)/arch/amd64/drivers/storage/nvme/nvme_xq.c \
 	  -o $@
+
+$(HOST_BIN)/xhci_q_test: $(HOST_BIN) tests/core/usb/xhci_q_test.c $(SRC_DIR)/arch/amd64/drivers/usb/xhci/xhci_q.c $(SRC_DIR)/arch/amd64/drivers/usb/xhci/xhci_q.h
+	$(HOST_CC) -I$(SRC_DIR)/arch/amd64/drivers/usb/xhci tests/core/usb/xhci_q_test.c $(SRC_DIR)/arch/amd64/drivers/usb/xhci/xhci_q.c -o $@
 
 $(HOST_BIN)/nvme_q_test: $(HOST_BIN) tests/core/nvme/nvme_q_test.c \
     $(SRC_DIR)/arch/amd64/drivers/storage/nvme/nvme_q.c $(SRC_DIR)/arch/amd64/drivers/storage/nvme/nvme_q.h

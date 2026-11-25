@@ -22,6 +22,7 @@
 #include "dev.h"
 #include "ramdisk.h"
 #include "storage.h"
+#include "xhci.h"
 #include "stage_volumes.h"
 #include "kmemory.h"
 #include "pci.h"
@@ -349,6 +350,28 @@ int stage_volumes(void) {
         exit_launch(boot_owner, init_owner);
     }
 
+    {
+        XhciInfo xi;
+        int xrc = xhci_probe_and_init(&xi);
+        if (xrc == XHCI_OK) {
+            xk_print("[XHCI] v");
+            report_hex((UINT64)xi.hci_version, 4);
+            xk_print(" slots="); report_hex((UINT64)xi.max_slots, 2);
+            xk_print(" ports="); report_hex((UINT64)xi.max_ports, 2);
+            xk_print(" ctx=");   report_hex((UINT64)xi.ctx_size, 2);
+            xk_print("B conn="); report_hex((UINT64)xi.connected_ports, 2);
+            XhciTrb sev;
+            int src = xhci_send_cmd(0ULL, 0u, XHCI_TRB_ENABLE_SLOT, 0u, &sev);
+            UINT32 sid = (src == XHCI_OK) ? xhci_evt_slot(&sev) : 0u;
+            if (sid) xhci_send_cmd(0ULL, 0u, XHCI_TRB_DISABLE_SLOT, (sid << 24), 0);
+            __asm__ volatile("sti; nop; nop; cli"); UINT32 xir = (xhci_irq_vector() >= 0) ? irq_vector_take((UINT32)xhci_irq_vector()) : 0u;
+            xk_print(" slot="); report_hex((UINT64)sid, 2);
+            xk_print(" irq=");  report_hex((UINT64)xir, 2);
+            xk_println(" noop=ok");
+        } else {
+            xk_print("[XHCI] init rc="); report_hex((UINT64)(UINT32)(-xrc), 2); xk_println("");
+        }
+    }
     /* Program ring table: the boot sets the policy, programs never do.
      * Empty at boot, so this changes nothing until XSYS_QUEUE_CREATE exists. */
     xrt_init(nvme_route_unbind, nvme_route_bind);
