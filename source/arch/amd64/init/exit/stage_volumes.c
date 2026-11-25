@@ -23,6 +23,7 @@
 #include "ramdisk.h"
 #include "storage.h"
 #include "xhci.h"
+#include "usb_msc.h"
 #include "stage_volumes.h"
 #include "kmemory.h"
 #include "pci.h"
@@ -360,14 +361,24 @@ int stage_volumes(void) {
             xk_print(" ports="); report_hex((UINT64)xi.max_ports, 2);
             xk_print(" ctx=");   report_hex((UINT64)xi.ctx_size, 2);
             xk_print("B conn="); report_hex((UINT64)xi.connected_ports, 2);
-            XhciTrb sev;
-            int src = xhci_send_cmd(0ULL, 0u, XHCI_TRB_ENABLE_SLOT, 0u, &sev);
-            UINT32 sid = (src == XHCI_OK) ? xhci_evt_slot(&sev) : 0u;
-            if (sid) xhci_send_cmd(0ULL, 0u, XHCI_TRB_DISABLE_SLOT, (sid << 24), 0);
+            UsbMscInfo mi;
+            int mrc = usb_msc_init(&mi);
             __asm__ volatile("sti; nop; nop; cli"); UINT32 xir = (xhci_irq_vector() >= 0) ? irq_vector_take((UINT32)xhci_irq_vector()) : 0u;
-            xk_print(" slot="); report_hex((UINT64)sid, 2);
-            xk_print(" irq=");  report_hex((UINT64)xir, 2);
+            xk_print(" irq="); report_hex((UINT64)xir, 2);
             xk_println(" noop=ok");
+            if (mrc == 0) {
+                uint8_t sec0[512];
+                int rrc = usb_msc_read_blocks(0ULL, 1u, sec0);
+                xk_print("[USB-MSC] slot="); report_hex((UINT64)mi.slot, 2);
+                xk_print(" blocks="); report_hex(mi.blocks, 4);
+                xk_print(" bsz="); report_hex((UINT64)mi.block_size, 4);
+                if (rrc == 0) {
+                    xk_print(" sig="); char sig[5] = {(char)sec0[0], (char)sec0[1], (char)sec0[2], (char)sec0[3], 0}; xk_print(sig);
+                }
+                xk_println("");
+            } else {
+                xk_print("[USB-MSC] init rc="); report_hex((UINT64)(UINT32)(-mrc), 2); xk_println("");
+            }
         } else {
             xk_print("[XHCI] init rc="); report_hex((UINT64)(UINT32)(-xrc), 2); xk_println("");
         }
