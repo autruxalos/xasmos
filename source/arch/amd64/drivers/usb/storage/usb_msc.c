@@ -74,3 +74,35 @@ int usb_msc_write_blocks(uint64_t lba, uint16_t count, const void *buf) {
     uint8_t cdb[16]; usb_scsi_cdb_write10(cdb, (uint32_t)lba, count);
     return msc_bot_cmd(cdb, 10u, USB_MSC_DIR_OUT, bytes);
 }
+static int msc_blk_read(void *ctx, uint64_t lba, uint32_t count, void *buf) {
+    (void)ctx; uint8_t *p = (uint8_t *)buf;
+    uint32_t max_c = 4096u / g_msc.info.block_size;
+    if (max_c == 0u) max_c = 1u;
+    while (count > 0u) {
+        uint32_t n = count > max_c ? max_c : count;
+        if (usb_msc_read_blocks(lba, (uint16_t)n, p) != 0) return BLK_E_IO;
+        lba += n; count -= n; p += n * g_msc.info.block_size;
+    }
+    return BLK_OK;
+}
+static int msc_blk_write(void *ctx, uint64_t lba, uint32_t count, const void *buf) {
+    (void)ctx; const uint8_t *p = (const uint8_t *)buf;
+    uint32_t max_c = 4096u / g_msc.info.block_size;
+    if (max_c == 0u) max_c = 1u;
+    while (count > 0u) {
+        uint32_t n = count > max_c ? max_c : count;
+        if (usb_msc_write_blocks(lba, (uint16_t)n, p) != 0) return BLK_E_IO;
+        lba += n; count -= n; p += n * g_msc.info.block_size;
+    }
+    return BLK_OK;
+}
+static int msc_blk_flush(void *ctx) { (void)ctx; return g_msc.info.active ? BLK_OK : BLK_E_IO; }
+static const BlkOps g_msc_ops = { msc_blk_read, msc_blk_write, msc_blk_flush, 0 };
+int usb_msc_blkdev(BlkDev *out) {
+    if (!out) return -1;
+    if (!g_msc.info.active && usb_msc_init(0) != 0) return -1;
+    out->ctx = &g_msc; out->ops = &g_msc_ops;
+    out->sector_size = g_msc.info.block_size;
+    out->sector_count = g_msc.info.blocks;
+    return 0;
+}

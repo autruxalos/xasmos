@@ -5,3 +5,4 @@ build/
 *.img
 *.core
 xasmos_usb.img
+xasmos_sata.img
