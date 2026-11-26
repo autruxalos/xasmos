@@ -36,7 +36,6 @@
 #define XSYS_WRITE          18u
 #define XSYS_READLINE       19u
 #define XSYS_CLEAR          20u
-#define XSYS_SHELL_CMD      21u
 
 /* Size of the resource dispatch table. Every XSYS_* above must be below it:
  * the static assert in sys.c fails the build otherwise. */

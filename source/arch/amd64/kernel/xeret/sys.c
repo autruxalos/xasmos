@@ -293,7 +293,6 @@ static const XsysHandler g_xsys_table[XSYS_TABLE_SIZE] = {
     [XSYS_WRITE]         = sys_write_con,
     [XSYS_READLINE]      = sys_readline_con,
     [XSYS_CLEAR]         = sys_clear_con,
-    [XSYS_SHELL_CMD]     = sys_shell_cmd,
 };
 
 /* Every registered number must fit in the table. */

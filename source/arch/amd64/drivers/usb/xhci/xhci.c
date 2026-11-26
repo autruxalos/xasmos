@@ -283,3 +283,50 @@ int xhci_bulk_xfer(uint32_t slot, uint8_t ep_addr, uint64_t buf_phys, uint32_t l
     ring_doorbell(slot, dci);
     return xhci_wait_xfer(slot, dci);
 }
+
+int xhci_find_connected_port_from(uint32_t start_port, uint32_t *port_out, uint32_t *speed_out) {
+    if (!g_xhci.regs) return XHCI_E_NODEV;
+    uint32_t p0 = (start_port > 0u) ? (start_port - 1u) : 0u;
+    for (uint32_t p = p0; p < (uint32_t)g_xhci.info.max_ports; p++) {
+        uint32_t psc = op_rd32(XHCI_OP_PORTSC_BASE + p * XHCI_OP_PORT_STRIDE);
+        if (xhci_port_connected(psc)) {
+            if (port_out) *port_out = p + 1u;
+            if (speed_out) *speed_out = xhci_port_speed(psc);
+            return XHCI_OK;
+        }
+    }
+    return XHCI_E_NODEV;
+}
+int xhci_configure_intr_in(uint32_t slot, uint8_t ep_in, uint16_t mps_in, uint8_t interval) {
+    if (slot == 0u || slot > XHCI_MAX_SLOTS_CAP) return XHCI_E_NODEV;
+    XhciDevState *ds = &g_xdev[slot];
+    uint32_t dci_in = ep_dci(ep_in);
+    for (uint32_t i = 0; i < 4096u; i++) ds->in_ctx[i] = 0u;
+    uint32_t *icc = ctx_dw(ds->in_ctx, 0u);
+    icc[1] = 1u | (1u << dci_in);
+    uint32_t *sc = ctx_dw(ds->in_ctx, 1u);
+    sc[0] = (dci_in << 27) | ((ds->speed & 0xFu) << 20);
+    sc[1] = (ds->port & 0xFFu) << 16;
+    void *rin_v = 0; uint64_t rin_pa = 0;
+    if (alloc_zero_page(&rin_pa, &rin_v) != 0) return XHCI_E_NOMEM;
+    xhci_cmd_ring_init(&ds->ep_ring[dci_in], (XhciTrb *)rin_v, rin_pa, XHCI_RING_TRBS);
+    uint32_t *ecin = ctx_dw(ds->in_ctx, dci_in + 1u);
+    uint32_t iv = interval ? (uint32_t)interval : 4u;
+    if (iv > 15u) iv = 15u;
+    ecin[0] = (iv << 16);
+    ecin[1] = (3u << 1) | (7u << 3) | ((uint32_t)mps_in << 16);
+    ecin[2] = (uint32_t)(rin_pa | 1ULL);
+    ecin[3] = (uint32_t)(rin_pa >> 32);
+    ecin[4] = ((uint32_t)mps_in << 16) | (uint32_t)mps_in;
+    XhciTrb ev;
+    return xhci_send_cmd(ds->in_ctx_pa, 0u, XHCI_TRB_CONFIG_EP, (slot << 24), &ev);
+}
+int xhci_intr_xfer(uint32_t slot, uint8_t ep_addr, uint64_t buf_phys, uint32_t len) {
+    if (slot == 0u || slot > XHCI_MAX_SLOTS_CAP) return XHCI_E_NODEV;
+    uint32_t dci = ep_dci(ep_addr);
+    XhciCmdRing *r = &g_xdev[slot].ep_ring[dci];
+    xhci_cmd_ring_push(r, buf_phys, len, XHCI_TRB_NORMAL, XHCI_TRB_IOC);
+    __asm__ volatile("mfence" ::: "memory");
+    ring_doorbell(slot, dci);
+    return xhci_wait_xfer(slot, dci);
+}

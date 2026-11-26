@@ -33,4 +33,7 @@ int xhci_dev_open(uint32_t port, uint32_t speed, uint32_t *slot_out);
 int xhci_ctrl_xfer(uint32_t slot, uint8_t req_type, uint8_t req, uint16_t val, uint16_t idx, uint16_t len, uint64_t data_phys);
 int xhci_configure_bulk(uint32_t slot, uint8_t ep_in, uint16_t mps_in, uint8_t ep_out, uint16_t mps_out);
 int xhci_bulk_xfer(uint32_t slot, uint8_t ep_addr, uint64_t buf_phys, uint32_t len);
+int xhci_find_connected_port_from(uint32_t start_port, uint32_t *port_out, uint32_t *speed_out);
+int xhci_configure_intr_in(uint32_t slot, uint8_t ep_in, uint16_t mps_in, uint8_t interval);
+int xhci_intr_xfer(uint32_t slot, uint8_t ep_addr, uint64_t buf_phys, uint32_t len);
 #endif

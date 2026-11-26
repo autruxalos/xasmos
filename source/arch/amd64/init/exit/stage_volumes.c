@@ -1,3 +1,4 @@
+#include "usb_hid.h"
 /******************************************************************************
  * XASMOS - bootstrap stage: volumes
  * Path: source/arch/amd64/init/exit/stage_volumes.c
@@ -18,7 +19,6 @@
 #include "mem/owner.h"
 #include "mem/budget.h"
 #include "mem/endpoint.h"
-#include "exfs.h"
 #include "dev.h"
 #include "ramdisk.h"
 #include "storage.h"
@@ -110,6 +110,7 @@ UINT32 g_shell_owner = 0;
 #define SHELL_LANE_RD0    1
 #define SHELL_LANE_ND0    2
 XToken g_shell_recv[3] = { XTOKEN_INVALID, XTOKEN_INVALID, XTOKEN_INVALID };
+static XToken g_shell_ser0 = XTOKEN_INVALID, g_shell_fb0 = XTOKEN_INVALID;
 XToken g_shell_send[3] = { XTOKEN_INVALID, XTOKEN_INVALID, XTOKEN_INVALID };
 XToken g_shell_budget  = XTOKEN_INVALID;   /* accepted by the boot in the shell's name */
 XToken g_shell_rd0     = XTOKEN_INVALID;
@@ -298,8 +299,8 @@ int stage_volumes(void) {
         return -1;
     }
     BlkDev *boot = dev_lookup("|dev|rd0");
-    if (!boot || exfs_format(boot) != EXFS_OK) {
-        xk_println("[EXIT ERROR] boot volume format failed");
+    if (!boot) {
+        xk_println("[EXIT ERROR] boot volume missing");
         return -1;
     }
     xk_println("[EXIT] boot volume |dev|rd0: exfs, 64 MiB, RAM");
@@ -338,12 +339,10 @@ int stage_volumes(void) {
      * the boot RAM volume. Mounting only reads; nothing is written here. */
     {
         BlkDev *sys = dev_lookup("|dev|nd0");
-        if (sys && exfs_mount(sys) == EXFS_OK) {
-            xk_println("[EXIT] root volume: |dev|nd0 (exfs, mounted)");
-        } else if (exfs_mount(boot) == EXFS_OK) {
-            xk_println("[EXIT] root volume: |dev|rd0 (no valid system disk)");
+        if (sys) {
+            xk_println("[EXIT] root block device: |dev|nd0 (handed to init)");
         } else {
-            xk_println("[EXIT ERROR] no volume could be mounted");
+            xk_println("[EXIT] root block device: |dev|rd0 (handed to init)");
         }
     }
 
@@ -373,6 +372,7 @@ int stage_volumes(void) {
         if (sh_ser0 != XTOKEN_INVALID) xtok_give(init_owner, sh_ser0, g_shell_owner);
         XToken sh_fb0  = (init_fb0 != XTOKEN_INVALID) ? xtok_derive_blocks(init_owner, init_fb0, 0ULL, 512ULL, XTOK_RIGHT_WRITE | XTOK_RIGHT_MAP | XTOK_RIGHT_GIVE) : XTOKEN_INVALID;
         if (sh_fb0 != XTOKEN_INVALID) xtok_give(init_owner, sh_fb0, g_shell_owner);
+        g_shell_ser0 = sh_ser0; g_shell_fb0 = sh_fb0;
         xtok_con_bind_session(g_shell_owner, sh_ser0, sh_fb0);
         exit_launch(boot_owner, init_owner);
     }
@@ -388,7 +388,8 @@ int stage_volumes(void) {
             xk_print(" ctx=");   report_hex((UINT64)xi.ctx_size, 2);
             xk_print("B conn="); report_hex((UINT64)xi.connected_ports, 2);
             UsbMscInfo mi;
-            int mrc = usb_msc_init(&mi);
+            UsbHidInfo hi; int hrc = usb_hid_init(&hi); if (hrc == 0) { xk_print("[USB-HID] kbd="); report_hex((UINT64)hi.kbd_active, 2); xk_print(" mouse="); report_hex((UINT64)hi.mouse_active, 2); xk_println(""); }
+    int mrc = usb_msc_init(&mi);
             __asm__ volatile("sti; nop; nop; cli"); UINT32 xir = (xhci_irq_vector() >= 0) ? irq_vector_take((UINT32)xhci_irq_vector()) : 0u;
             xk_print(" irq="); report_hex((UINT64)xir, 2);
             xk_println(" noop=ok");
@@ -472,10 +473,6 @@ int stage_volumes(void) {
 
     return 0;
 }
-extern void shell_set_caps(UINT32 owner, XToken bud, XToken rd0, XToken nd0);
-extern int shell_dispatch(const char *cmd, const char *arg);
-extern struct { int pending; char cmd[64]; char arg[200]; XToken bud, rd0, nd0; } g_shell_req;
-
 void exit_launch_shell(void) {
     if (g_shell_owner == XTOK_OWNER_KERNEL) return;
     XToken load_bud = XTOKEN_INVALID;
@@ -483,7 +480,7 @@ void exit_launch_shell(void) {
     XAspace as;
     if (xas_create(&as, g_shell_owner) != XAS_OK) { xtok_release(load_bud); return; }
     XLoadResult res;
-    if (xload_exb(&as, g_shell_owner, (uint64_t)load_bud, xsh_prog_exb, xsh_prog_exb_len, &res) != XLOAD_OK) {
+    int lrc = xload_exb(&as, g_shell_owner, (uint64_t)load_bud, xsh_prog_exb, xsh_prog_exb_len, &res); if (lrc != XLOAD_OK) { xk_print("[XSH load err="); report_dec((unsigned)(-lrc)); xk_println("]");
         xas_destroy(&as);
         xtok_release(load_bud);
         return;
@@ -494,14 +491,11 @@ void exit_launch_shell(void) {
     ctx.rdi = (UINT64)g_shell_recv[0];
     ctx.rsi = (UINT64)g_shell_recv[1];
     ctx.rdx = (UINT64)g_shell_recv[2];
+    ctx.rcx = (UINT64)g_shell_ser0;
+    ctx.r8  = (UINT64)g_shell_fb0;
     for (;;) {
         xproc_run_ctx(&as, &ctx, &r);
-        if (r.reason == XPROC_YIELD && g_shell_req.pending) {
-            g_shell_req.pending = 0;
-            shell_set_caps(g_shell_owner, g_shell_req.bud, g_shell_req.rd0, g_shell_req.nd0);
-            shell_dispatch(g_shell_req.cmd, g_shell_req.arg);
-            continue;
-        }
+        if (r.reason == XPROC_YIELD) continue;
         break;
     }
     xas_destroy(&as);
