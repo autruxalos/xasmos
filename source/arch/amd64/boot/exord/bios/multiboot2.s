@@ -1,26 +1,11 @@
 .code32
-.section .multiboot
-.align 4
-.long 0x1BADB002
-.long 0x00000003
-.long -(0x1BADB002 + 0x00000003)
-
-.section .text
+.section .text.startup
 .global _start
 .extern kernel_main
-
 _start:
-    cli
-    movl $stack_top, %esp
-    pushl %ebx
-    pushl %eax
+    movl $0x90000, %esp
+    pushl $0
+    pushl $0x2BADB002
     call kernel_main
-.halt:
-    hlt
-    jmp .halt
-
-.section .bss
-.align 16
-stack_bottom:
-    .space 16384
-stack_top:
+1:  hlt
+    jmp 1b

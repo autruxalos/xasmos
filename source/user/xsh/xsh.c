@@ -1,7 +1,7 @@
 #include "xasm_user.h"
 #include "xasm_ipc_proto.h"
 #define MAX_LOCAL_NODES 24
-#define IPC_MAP_VA 0x0000008000040000ULL
+#define IPC_MAP_VA XASM_USER_IPC_VA
 typedef struct { int used, is_dir; char name[48]; char data[176]; } LocalNode;
 static XToken g_ep_exfs = 0, g_ep_auxlad = 0, g_ep_reply_recv = 0, g_ep_reply_send = 0, g_ser0 = 0, g_fb0 = 0;
 static int g_is_sprusr = 0;

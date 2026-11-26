@@ -12,7 +12,7 @@ static inline uint32_t hda_r32(uint32_t r) { return *(volatile uint32_t *)(g_hda
 static inline void hda_w32(uint32_t r, uint32_t v) { *(volatile uint32_t *)(g_hda.mmio + r) = v; }
 
 int hda_init(HdaInfo *out) {
-    const PciDev *d = pci_find(0x04u, 0x03u, PCI_ANY_PROG_IF, 0);
+    const PciDev *d = pci_find(0x04u, 0x03u, 0xFFu, 0);
     if (!d || d->bar[0] == 0ULL) return -1;
     (void)pci_enable(d);
     g_hda.mmio = (volatile uint8_t *)(UINTN)d->bar[0];

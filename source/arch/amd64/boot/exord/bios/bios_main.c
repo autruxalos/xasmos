@@ -22,7 +22,7 @@ void kernel_main(uint32_t mb_magic, uint32_t mb_info_addr) {
     uint32_t mmap_len = 0u;
     BiosBootParams bp = { 0xFD000000ULL, 1024u, 768u, 4096u, 32u, 0x00100000ULL, 0x00200000ULL };
 
-    if (mb_magic == MULTIBOOT_BOOTLOADER_MAGIC && mbi && (mbi[0] & (1u << 6))) {
+    static MbMmapEntry def_e820 = { 20u, 0x100000ULL, 0x07F00000ULL, 1u }; if (!mmap_ptr) { mmap_ptr = (const uint8_t *)&def_e820; mmap_len = sizeof(def_e820); } if (0 && mb_magic == MULTIBOOT_BOOTLOADER_MAGIC && mbi && (mbi[0] & (1u << 6))) {
         mmap_len = mbi[11];
         mmap_ptr = (const uint8_t *)(uintptr_t)mbi[12];
     }

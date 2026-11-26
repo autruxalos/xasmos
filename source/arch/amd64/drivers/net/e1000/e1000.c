@@ -30,7 +30,7 @@ static uint16_t e1000_read_eeprom(uint8_t addr) {
 int e1000_init(E1000Info *out) {
     const PciDev *d = 0;
     for (int skip = 0; ; skip++) {
-        const PciDev *cand = pci_find(0x02u, 0x00u, PCI_ANY_PROG_IF, skip);
+        const PciDev *cand = pci_find(0x02u, 0x00u, 0xFFu, skip);
         if (!cand) break;
         if (e1000_is_supported_device(cand->vendor, cand->device) && cand->bar[0] != 0ULL) { d = cand; break; }
     }

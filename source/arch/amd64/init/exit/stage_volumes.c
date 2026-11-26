@@ -496,7 +496,7 @@ void exit_launch_shell(void) {
     XToken ep_exfs_r = XTOKEN_INVALID, ep_exfs_s = XTOKEN_INVALID;
     XToken ep_aux_r = XTOKEN_INVALID, ep_aux_s = XTOKEN_INVALID;
     XToken ep_rep_r = XTOKEN_INVALID, ep_rep_s = XTOKEN_INVALID;
-    XASpace as_exfs, as_aux; XLoadResult res_exfs, res_aux;
+    XAspace as_exfs, as_aux; XLoadResult res_exfs, res_aux;
     XContext ctx_exfs, ctx_aux; XProcResult r_srv;
     int exfs_ok = 0, aux_ok = 0;
     if (own_exfs && xtok_budget_mint(own_exfs, 256, &bud_exfs) == 0 &&

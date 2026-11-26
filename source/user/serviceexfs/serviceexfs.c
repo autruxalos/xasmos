@@ -2,7 +2,7 @@
 #include "xasm_ipc_proto.h"
 
 #define MAX_EXFS_NODES 32
-#define IPC_MAP_VA     0x0000008000040000ULL
+#define IPC_MAP_VA     XASM_USER_IPC_VA
 
 typedef struct { int used, is_dir; char name[48]; char data[176]; } ExfsNode;
 static ExfsNode g_nodes[MAX_EXFS_NODES];

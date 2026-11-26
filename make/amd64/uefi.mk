@@ -71,7 +71,7 @@ SRCS := \
 	arch/amd64/drivers/usb/xhci/xhci_q.c \
 	arch/amd64/drivers/usb/xhci/xhci.c \
 	arch/amd64/drivers/usb/storage/usb_msc_q.c \
-	arch/amd64/drivers/usb/storage/usb_msc.c      arch/amd64/drivers/usb/hid/usb_hid.c      arch/amd64/drivers/usb/hid/usb_hid_q.c \n    arch/amd64/drivers/net/e1000/e1000.c \n    arch/amd64/drivers/net/e1000/e1000_q.c \n    arch/amd64/drivers/audio/hda/hda.c \n    arch/amd64/drivers/audio/hda/hda_q.c \n    arch/amd64/drivers/iommu/ivrs_q.c \n    arch/amd64/boot/exord/bios/bios_handoff.c \
+	arch/amd64/drivers/usb/storage/usb_msc.c      arch/amd64/drivers/usb/hid/usb_hid.c      arch/amd64/drivers/usb/hid/usb_hid_q.c      arch/amd64/drivers/net/e1000/e1000.c      arch/amd64/drivers/net/e1000/e1000_q.c      arch/amd64/drivers/audio/hda/hda.c      arch/amd64/drivers/audio/hda/hda_q.c      arch/amd64/drivers/iommu/ivrs_q.c      arch/amd64/boot/exord/bios/bios_handoff.c \
         arch/amd64/syslib/core/path.c \
         core/xerlibc/src/mem.c \
         core/xerlibc/src/str.c \
@@ -155,7 +155,7 @@ $(BUILD)/OVMF_VARS.fd:
 	@if [ -z "$(OVMF)" ] || [ ! -f "$(OVMF)" ]; then 		echo "Error: No se encontro firmware OVMF. Pasa OVMF=/ruta/a/OVMF_CODE.fd"; 		exit 1; 	fi
 	mkdir -p $(BUILD)
 	@if [ -n "$(OVMF_VARS_SRC)" ] && [ -f "$(OVMF_VARS_SRC)" ]; then 		cp "$(OVMF_VARS_SRC)" $@; 	else 		SIZE=$$(wc -c < "$(OVMF)" | tr -d " "); 		dd if=/dev/zero of=$@ bs=1 count=$$SIZE status=none; 	fi
-qemu: $(IMG) $(DISK) $(BUILD)/OVMF_VARS.fd
+qemu-run: $(IMG) $(DISK) $(BUILD)/OVMF_VARS.fd
 	qemu-system-x86_64 -machine q35 -cpu qemu64 -accel $(ACCEL) -m 512M \
 	  -drive if=pflash,format=raw,readonly=on,file=$(OVMF) \
 	  -drive if=pflash,format=raw,file=$(BUILD)/OVMF_VARS.fd \

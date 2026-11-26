@@ -1,7 +1,7 @@
 #include "xasm_user.h"
 #include "xasm_ipc_proto.h"
 
-#define IPC_MAP_VA 0x0000008000040000ULL
+#define IPC_MAP_VA XASM_USER_IPC_VA
 
 static void scpy(char *d, const char *s, uint64_t m) {
     uint64_t i = 0;
