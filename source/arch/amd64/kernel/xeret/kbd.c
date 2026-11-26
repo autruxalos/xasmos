@@ -6,7 +6,7 @@ extern void xk_putchar(char c);          /* fb_console.c */
 
 /* Diagnostic: when 1, every raw status/scancode pair is written to COM1.
  * Set to 0 once the keyboard path is confirmed. */
-#define KBD_DEBUG 1
+#define KBD_DEBUG 0
 
 #if KBD_DEBUG
 extern void serial_puts(const char *s);
