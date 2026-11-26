@@ -1,3 +1,4 @@
+#include "arch/amd64/cpu_relax.h"
 /******************************************************************************
  * XASMOS - Minimal spinlock (xeret)
  * Path: source|kerncall|include|spinlock.h
