@@ -1,3 +1,4 @@
+#include "e1000.h"
 #include "usb_hid.h"
 /******************************************************************************
  * XASMOS - bootstrap stage: volumes
@@ -389,6 +390,7 @@ int stage_volumes(void) {
             xk_print("B conn="); report_hex((UINT64)xi.connected_ports, 2);
             UsbMscInfo mi;
             UsbHidInfo hi; int hrc = usb_hid_init(&hi); if (hrc == 0) { xk_print("[USB-HID] kbd="); report_hex((UINT64)hi.kbd_active, 2); xk_print(" mouse="); report_hex((UINT64)hi.mouse_active, 2); xk_println(""); }
+    E1000Info ni; if (e1000_init(&ni) == 0) { xk_print("[NIC-E1000] dev="); report_hex((UINT64)ni.device, 4); xk_println(""); }
     int mrc = usb_msc_init(&mi);
             __asm__ volatile("sti; nop; nop; cli"); UINT32 xir = (xhci_irq_vector() >= 0) ? irq_vector_take((UINT32)xhci_irq_vector()) : 0u;
             xk_print(" irq="); report_hex((UINT64)xir, 2);
