@@ -1,3 +1,5 @@
+#include "serviceexfs_exb.h"
+#include "serviceauxlad_exb.h"
 #include "e1000.h"
 #include "usb_hid.h"
 /******************************************************************************
@@ -487,15 +489,47 @@ void exit_launch_shell(void) {
         xtok_release(load_bud);
         return;
     }
-    XContext ctx;
-    XProcResult r;
+    UINT32 own_exfs = owner_new(), own_aux = owner_new();
+    XToken bud_exfs = XTOKEN_INVALID, bud_aux = XTOKEN_INVALID;
+    XToken ep_exfs_r = XTOKEN_INVALID, ep_exfs_s = XTOKEN_INVALID;
+    XToken ep_aux_r = XTOKEN_INVALID, ep_aux_s = XTOKEN_INVALID;
+    XToken ep_rep_r = XTOKEN_INVALID, ep_rep_s = XTOKEN_INVALID;
+    XASpace as_exfs, as_aux; XLoadResult res_exfs, res_aux;
+    XContext ctx_exfs, ctx_aux; XProcResult r_srv;
+    int exfs_ok = 0, aux_ok = 0;
+    if (own_exfs && xtok_budget_mint(own_exfs, 256, &bud_exfs) == 0 &&
+        xep_create(own_exfs, &ep_exfs_r) == 0 &&
+        xep_send_cap(own_exfs, ep_exfs_r, g_shell_owner, &ep_exfs_s) == 0 &&
+        xas_create(&as_exfs, own_exfs) == XAS_OK &&
+        xload_exb(&as_exfs, own_exfs, (uint64_t)bud_exfs, g_serviceexfs_exb, g_serviceexfs_exb_len, &res_exfs) == XLOAD_OK) {
+        xctx_init(&ctx_exfs, res_exfs.entry, res_exfs.stack_top);
+        ctx_exfs.rdi = (UINT64)ep_exfs_r;
+        exfs_ok = 1;
+        xk_println("[SERVICE] serviceexfs.exb armed (ring-3 zero-copy IPC)");
+    }
+    if (own_aux && xtok_budget_mint(own_aux, 256, &bud_aux) == 0 &&
+        xep_create(own_aux, &ep_aux_r) == 0 &&
+        xep_send_cap(own_aux, ep_aux_r, g_shell_owner, &ep_aux_s) == 0 &&
+        xas_create(&as_aux, own_aux) == XAS_OK &&
+        xload_exb(&as_aux, own_aux, (uint64_t)bud_aux, g_serviceauxlad_exb, g_serviceauxlad_exb_len, &res_aux) == XLOAD_OK) {
+        xctx_init(&ctx_aux, res_aux.entry, res_aux.stack_top);
+        ctx_aux.rdi = (UINT64)ep_aux_r;
+        aux_ok = 1;
+        xk_println("[SERVICE] serviceauxlad.exb armed (ring-3 zero-copy IPC)");
+    }
+    (void)xep_create(g_shell_owner, &ep_rep_r);
+    (void)xep_send_cap(g_shell_owner, ep_rep_r, g_shell_owner, &ep_rep_s);
+    XContext ctx; XProcResult r;
     xctx_init(&ctx, res.entry, res.stack_top);
-    ctx.rdi = (UINT64)g_shell_recv[0];
-    ctx.rsi = (UINT64)g_shell_recv[1];
-    ctx.rdx = (UINT64)g_shell_recv[2];
+    ctx.rdi = (UINT64)ep_exfs_s;
+    ctx.rsi = (UINT64)ep_aux_s;
+    ctx.rdx = (UINT64)ep_rep_r;
     ctx.rcx = (UINT64)g_shell_ser0;
     ctx.r8  = (UINT64)g_shell_fb0;
+    ctx.r9  = (UINT64)ep_rep_s;
     for (;;) {
+        if (exfs_ok) xproc_run_ctx(&as_exfs, &ctx_exfs, &r_srv);
+        if (aux_ok)  xproc_run_ctx(&as_aux, &ctx_aux, &r_srv);
         xproc_run_ctx(&as, &ctx, &r);
         if (r.reason == XPROC_YIELD) continue;
         break;
