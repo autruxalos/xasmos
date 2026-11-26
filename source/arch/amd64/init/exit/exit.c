@@ -8,7 +8,7 @@
 #include "exit.h"
 #include "stage_volumes.h"
 
-extern void shell_main(void);
+extern void exit_launch_shell(void);
 extern void xk_println(const char *str);
 
 void exit_main_executor(void) {
@@ -22,7 +22,7 @@ void exit_main_executor(void) {
     }
 
     xk_println("[EXIT] Spawning core shell (XSH)...");
-    shell_main();
+    exit_launch_shell();
 
     /* The shell returns only on halt; trap the system safely either way. */
     xk_println("[EXIT ERROR] Core shell terminated unexpectedly. Halting system.");

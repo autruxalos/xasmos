@@ -1,4 +1,5 @@
 /* Host replacements for what the kernel gets from physical memory and devices. */
+#include "capability.h"
 #include <stdlib.h>
 #include <string.h>
 #include "kmemory.h"
@@ -11,10 +12,12 @@ UINT64 phys_alloc_frames(UINT64 n) {
     return (UINT64)(uintptr_t)p;
 }
 
+static UINT64 g_phys_freed;
 void phys_free_frames(UINT64 addr, UINT64 n) {
-    (void)n;
+    g_phys_freed += n;
     free((void *)(uintptr_t)addr);
 }
+UINT64 host_phys_freed(void) { return g_phys_freed; }
 
 UINT64 phys_alloc_huge(void) { return phys_alloc_frames(512); }
 
@@ -52,3 +55,7 @@ void host_dev_init(BlkDev *d, uint32_t ss, uint64_t sc) {
 }
 
 void host_dev_fail(int on) { g_fail = on; }
+
+/* Host stub: the address space is not built on the host. Revocation of
+ * mappings is a no-op here; token_ledger's own revocation still runs. */
+int xas_revoke_token(XToken tok) { (void)tok; return 0; }

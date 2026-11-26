@@ -26,11 +26,11 @@
 
 /* Pure check, must not allocate: may `owner` take `frames` frames and `tokens`
  * tokens right now? Returns 1 if yes, 0 if no. */
-int   xlb_quota_ok(uint32_t owner, uint64_t frames, uint32_t tokens);
+int   xlb_quota_ok(uint32_t owner, uint64_t budget, uint64_t frames, uint32_t tokens);
 
 /* Allocates `frames` zeroed frames as one token for `owner`. Returns 0 and
  * sets *token, or XLOAD_E_NOMEM. */
-int   xlb_alloc(uint32_t owner, uint64_t frames, uint32_t rights, uint64_t *token);
+int   xlb_alloc(uint32_t owner, uint64_t budget, uint64_t frames, uint32_t rights, uint64_t *token);
 
 /* Kernel-writable pointer to the first byte of the token's frames. */
 void *xlb_kernel_ptr(uint64_t token);

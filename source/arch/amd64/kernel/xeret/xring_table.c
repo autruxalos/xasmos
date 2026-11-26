@@ -9,6 +9,7 @@
  * only after the token is gone.
  ******************************************************************************/
 #include "xring_table.h"
+#include "mem/budget.h"
 
 /* Revokes every mapping of a token in every address space (paging.c). */
 int xas_revoke_token(XToken tok);
@@ -24,34 +25,14 @@ typedef struct {
 } XrtEntry;
 
 static XrtEntry g_ent[XRT_IDS];
-static struct { int used; UINT32 owner; UINT32 cap; } g_cap[XRT_CAPS];
 static KrUnbindFn g_unbind;
 static KrBindFn   g_bind;
 
 void xrt_init(KrUnbindFn unbind, KrBindFn bind) {
     uint32_t i;
     for (i = 0; i < XRT_IDS; i++)  g_ent[i].used = 0;
-    for (i = 0; i < XRT_CAPS; i++) g_cap[i].used = 0;
     g_unbind = unbind;
     g_bind = bind;
-}
-
-static UINT32 cap_of(UINT32 owner) {
-    uint32_t i;
-    for (i = 0; i < XRT_CAPS; i++)
-        if (g_cap[i].used && g_cap[i].owner == owner) return g_cap[i].cap;
-    return 0;
-}
-
-void xrt_set_cap(UINT32 owner, UINT32 n) {
-    uint32_t i;
-    for (i = 0; i < XRT_CAPS; i++)
-        if (g_cap[i].used && g_cap[i].owner == owner) { g_cap[i].cap = n; return; }
-    for (i = 0; i < XRT_CAPS; i++)
-        if (!g_cap[i].used) {
-            g_cap[i].used = 1; g_cap[i].owner = owner; g_cap[i].cap = n;
-            return;
-        }
 }
 
 UINT32 xrt_owner_count(UINT32 owner) {
@@ -66,7 +47,7 @@ static void xrt_route_done(void *arg, uint32_t slot, int32_t st) {
     kr_complete((KRing *)arg, slot, st);
 }
 
-int xrt_create(UINT32 owner, UINT32 entries, XToken *out) {
+int xrt_create(UINT32 owner, XToken budget, UINT32 entries, XToken *out) {
     uint32_t id;
     UINT64 phys = 0, frames = 0, need;
     XToken tok;
@@ -75,12 +56,14 @@ int xrt_create(UINT32 owner, UINT32 entries, XToken *out) {
     if (out) *out = XTOKEN_INVALID;
     if (entries < XQ_MIN_ENTRIES || entries > XRT_MAX_ENTRIES ||
         (entries & (entries - 1u)) != 0) return XRT_E_ARG;
-    if (xrt_owner_count(owner) >= cap_of(owner)) return XRT_E_CAP;
     for (id = 1; id < XRT_IDS && g_ent[id].used; id++) { }
     if (id >= XRT_IDS) return XRT_E_NOMEM;
 
     need = (xq_bytes(entries) + 4095u) / 4096u;
-    tok = xtok_alloc_ram(owner, need, XTOK_RIGHTS_RAM_DEFAULT);
+    /* The ring's frames are paid from the budget the program presents: no per-owner
+     * cap in the kernel. The token is a child of the budget, so release refunds it. */
+    if (xtok_alloc_ram_from(owner, budget, need, XTOK_RIGHTS_RAM_DEFAULT, &tok) != 0)
+        return XRT_E_NOMEM;
     if (tok == XTOKEN_INVALID) return XRT_E_NOMEM;
     if (xtok_ram_info(tok, &phys, &frames) != 0 || xtok_hold(tok) != 0) {
         xtok_release(tok);

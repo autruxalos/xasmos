@@ -12,6 +12,9 @@
 #define XTOK_KIND_MMIO   2u
 #define XTOK_KIND_IRQ    3u
 #define XTOK_KIND_BLOCKS 4u   /* a range of blocks on a registered block device */
+#define XTOK_KIND_ENDPOINT 5u /* receiver-owned transfer point (mem/endpoint.c) */
+#define XTOK_KIND_BUDGET   6u   /* memory budget: n_frames is the balance (mem/budget.h) */
+#define XTOK_KIND_MEM      7u   /* fixed frames (e.g. rd0): never returned to the allocator, never released */
 
 #define XTOK_RIGHT_READ    (1u << 0)
 #define XTOK_RIGHT_WRITE   (1u << 1)
@@ -20,6 +23,8 @@
 #define XTOK_RIGHT_DMA     (1u << 4)
 #define XTOK_RIGHT_RELEASE (1u << 5)
 #define XTOK_RIGHT_GIVE    (1u << 6)   /* may transfer the token to another owner */
+#define XTOK_RIGHT_RECV (1u << 7)   /* endpoint: accept offers */
+#define XTOK_RIGHT_SEND (1u << 8)   /* endpoint: offer to it */
 
 #define XTOK_RIGHTS_RAM_DEFAULT \
     (XTOK_RIGHT_READ | XTOK_RIGHT_WRITE | XTOK_RIGHT_MAP | \
@@ -37,27 +42,6 @@ typedef UINT64 XToken;
 
 /* Device grants: which owner may request block tokens on which device, and
  * with which maximum rights. An empty table grants nothing. */
-#define XTOK_GRANT_MAX 16u
-
-typedef struct {
-    char    dev[8];      /* registered name, e.g. "rd0" or "nd0" */
-    UINT32  owner_id;    /* program allowed to request the token */
-    UINT32  rights;      /* maximum rights granted */
-    UINT64  first;       /* range grant: first block granted          */
-    UINT64  count;       /* range grant: blocks granted; 0 = whole device */
-} XTokenGrant;
-
-/* Copies the built-in minimal policy into the active table at boot. */
-void xtok_grant_init(void);
-
-/* 1 if an entry covers the request (device, owner, rights), 0 otherwise. */
-int  xtok_grant_check(const char *dev, UINT32 owner, UINT32 rights);
-void xtok_grants_reset(void);
-int  xtok_grant_put_full(const char *dev, UINT32 owner, UINT32 rights);
-int  xtok_grant_put_range(const char *dev, UINT32 owner, UINT32 rights,
-                          UINT64 first, UINT64 count);
-int  xtok_grant_check_range(const char *dev, UINT32 owner, UINT32 rights,
-                            UINT64 lba, UINT64 count);
 
 /* Field meaning depends on kind:
  *   RAM:    phys = physical address, n_frames = frame count
@@ -79,6 +63,8 @@ typedef struct {
     UINT64  start;       /* BLOCKS only: first block of the range */
     UINT32  io_count;    /* BLOCKS only: device operations in flight */
     UINT32  hold;        /* kernel-owned retention: blocks release, not mapping */
+    UINT32  frozen;      /* offered for transfer: no use, release or map until accept/cancel */
+    XToken  parent;      /* derivation parent, XTOKEN_INVALID for roots */
 } XTokenEntry;
 
 #define XTOK_TABLE_SLOTS  4096u
@@ -114,6 +100,7 @@ UINT32 xtok_live_count(void);
 #define XTOK_REL_ESTALE   (-1)
 #define XTOK_REL_EBUSY    (-2)   /* still mapped */
 #define XTOK_REL_ERIGHTS  (-3)   /* owner's token, but without RELEASE */
+#define XTOK_REL_ETOOBIG  (-4)   /* revocation subtree larger than XTOK_REVOKE_MAX */
 
 /* Holder-initiated free: requires ownership AND the RELEASE right. */
 int    xtok_release_owned(XToken tok, UINT32 owner);
@@ -178,4 +165,47 @@ XToken xtok_derive_blocks(UINT32 owner, XToken parent, UINT64 first, UINT64 coun
  * range are unchanged. Returns 0, or -1. */
 int  xtok_give(UINT32 giver, XToken tok, UINT32 dest);
 
+/* Endpoint layer primitives (mem/endpoint.c). The ledger only stores and
+ * freezes; policy about who may offer or accept is in endpoint.c. */
+XToken xtok_alloc_endpoint(UINT32 owner, UINT64 value, UINT32 rights);
+int    xtok_ep_value(XToken tok, UINT32 owner, UINT32 right, UINT64 *value);
+int    xtok_offer_begin(UINT32 giver, XToken tok);
+int    xtok_thaw_to(XToken tok, UINT32 owner);
+int    xtok_thaw(XToken tok);
+
+/* Read-only inspection, for the exokernel invariant checks (tests/arch/amd64).
+ * Returns the number of live slots visited. Never changes state. */
+typedef struct {
+    XToken  tok;
+    UINT32  kind;
+    UINT32  owner;
+    UINT32  rights;
+    UINT64  start;
+    UINT64  count;       /* n_frames for RAM, block count for BLOCKS */
+    UINT32  frozen;
+    UINT32  hold;
+    UINT32  io_count;
+    UINT16  map_count;
+    XToken  parent;      /* derivation parent, XTOKEN_INVALID if none */
+} XTokenView;
+
+UINT32 xtok_inspect_all(XTokenView *out, UINT32 max);
+
+/* Revocation: retires tok and every descendant reached by parent links, as one
+ * step. Refused, with nothing changed, if any member is busy. */
+int xtok_revoke(XToken tok, UINT32 owner);
+
+/* Memory-backed fixed frames (rd0). Wraps frames that already exist; the
+ * ledger never returns them to the physical allocator. */
+int    xtok_mem_wrap(UINT32 owner, UINT64 phys, UINT64 n_frames, XToken *out);
+UINT64 xtok_mem_free_count(void);
+
+/* Fixed memory from a list of frames (volume of the boot). Frames need not be
+ * contiguous. xtok_frame_at walks them; map_acquire gives no contiguous range. */
+int    xtok_mem_wrap_list(UINT32 owner, const UINT64 *frames, UINT64 n, XToken *out);
+int    xtok_frame_at(XToken tok, UINT64 i, UINT64 *phys);
+
+void xtok_con_register_devs(const void *ser_dev, const void *fb_dev);
+void xtok_con_bind_session(UINT32 owner_id, XToken ser_tok, XToken fb_tok);
+int  xtok_con_authorize(UINT32 owner_id, XToken tok, UINT32 req_rights);
 #endif /* XASMOS_CAPABILITY_H */

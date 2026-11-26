@@ -51,7 +51,7 @@ static uint32_t seg_perms(uint32_t flags) {
     return p;
 }
 
-int xload_exb(XAspace *as, uint32_t owner, const void *image, uint64_t size,
+int xload_exb(XAspace *as, uint32_t owner, uint64_t budget, const void *image, uint64_t size,
               XLoadResult *out) {
     if (!as || !image || !out || size == 0) return XLOAD_E_ARG;
     if (owner == XTOK_OWNER_KERNEL)         return XLOAD_E_ARG;
@@ -62,7 +62,7 @@ int xload_exb(XAspace *as, uint32_t owner, const void *image, uint64_t size,
     uint64_t stack_pages = info.stack_bytes / XLB_PAGE;
     uint64_t frames      = info.image_pages + stack_pages;
     uint32_t tokens      = info.seg_count + 1;
-    if (!xlb_quota_ok(owner, frames, tokens)) return XLOAD_E_QUOTA;
+    if (!xlb_quota_ok(owner, budget, frames, tokens)) return XLOAD_E_QUOTA;
 
     Txn t;
     t.as = as;
@@ -75,7 +75,7 @@ int xload_exb(XAspace *as, uint32_t owner, const void *image, uint64_t size,
         const ExbSeg *s = &info.seg[i];
         uint64_t tok;
 
-        if (xlb_alloc(owner, s->pages, seg_rights(s->flags), &tok) != 0) {
+        if (xlb_alloc(owner, budget, s->pages, seg_rights(s->flags), &tok) != 0) {
             rollback(&t);
             return XLOAD_E_NOMEM;
         }
@@ -99,7 +99,7 @@ int xload_exb(XAspace *as, uint32_t owner, const void *image, uint64_t size,
     uint64_t stack_base = stack_top - info.stack_bytes;
     uint64_t tok;
 
-    if (xlb_alloc(owner, stack_pages,
+    if (xlb_alloc(owner, budget, stack_pages,
                   XTOK_RIGHT_READ | XTOK_RIGHT_WRITE | XTOK_RIGHT_MAP | XTOK_RIGHT_RELEASE,
                   &tok) != 0) {
         rollback(&t);

@@ -42,13 +42,13 @@ static int live_maps(void)   { int n = 0; for (int i = 0; i < FM; i++) n += fm[i
 static int live_frames(void) { uint64_t n = 0; for (int i = 0; i < FT; i++) if (ft[i].live) n += ft[i].frames; return (int)n; }
 
 /* ---- the fake backend ---- */
-int xlb_quota_ok(uint32_t owner, uint64_t frames, uint32_t tokens) {
-    (void)owner; (void)frames; (void)tokens;
+int xlb_quota_ok(uint32_t owner, uint64_t budget, uint64_t frames, uint32_t tokens) {
+    (void)owner; (void)budget; (void)budget; (void)frames; (void)tokens;
     return quota_ok_answer;
 }
 
-int xlb_alloc(uint32_t owner, uint64_t frames, uint32_t rights, uint64_t *token) {
-    (void)owner;
+int xlb_alloc(uint32_t owner, uint64_t budget, uint64_t frames, uint32_t rights, uint64_t *token) {
+    (void)owner; (void)budget; (void)budget;
     int k = alloc_calls++;
     if (k == fail_alloc_at) return XLOAD_E_NOMEM;
     for (int i = 0; i < FT; i++) {
@@ -133,7 +133,7 @@ static void test_valid_full(void) {
     size_t n; uint8_t *img = load_file("valid_full", &n);
     XAspace as = { 1 };
     XLoadResult r;
-    int rc = xload_exb(&as, 1, img, n, &r);
+    int rc = xload_exb(&as, 1, 1, img, n, &r);
     CHECK(rc == XLOAD_OK, "valid_full loads (got %d)", rc);
     CHECK(r.entry == 0x8000000000ULL, "entry is the image entry");
     CHECK(r.stack_top == XLB_USER_TOP - XLB_PAGE, "stack top sits below the guard page");
@@ -166,7 +166,7 @@ static void test_default_stack(void) {
     reset();
     size_t n; uint8_t *img = load_file("valid_nocaps", &n);
     XAspace as = { 2 }; XLoadResult r;
-    CHECK(xload_exb(&as, 1, img, n, &r) == XLOAD_OK, "valid_nocaps loads");
+    CHECK(xload_exb(&as, 1, 1, img, n, &r) == XLOAD_OK, "valid_nocaps loads");
     CHECK(r.stack_bytes == 4 * XLB_PAGE, "no manifest: default stack of 4 pages");
     free(img);
 }
@@ -175,7 +175,7 @@ static void test_bss_segment(void) {
     reset();
     size_t n; uint8_t *img = load_file("valid_bss_only_segment", &n);
     XAspace as = { 3 }; XLoadResult r;
-    CHECK(xload_exb(&as, 1, img, n, &r) == XLOAD_OK, "bss-only segment loads");
+    CHECK(xload_exb(&as, 1, 1, img, n, &r) == XLOAD_OK, "bss-only segment loads");
     CHECK(live_frames() == 1 + 64 + 4, "64 bss pages + code + default stack (got %d)", live_frames());
     free(img);
 }
@@ -190,7 +190,7 @@ static void test_corpus_rejections(void) {
         reset();
         size_t n; uint8_t *img = load_file(name, &n);
         XAspace as = { 4 }; XLoadResult r;
-        int rc = xload_exb(&as, 1, img, n, &r);
+        int rc = xload_exb(&as, 1, 1, img, n, &r);
         /* a zero-byte file is an argument error, caught before parsing */
         int want = (n == 0) ? XLOAD_E_ARG : XLOAD_E_IMAGE;
         if (rc != want || live_tokens() != 0 || live_maps() != 0 || alloc_calls != 0) {
@@ -208,14 +208,14 @@ static void test_args_and_quota(void) {
     reset();
     size_t n; uint8_t *img = load_file("valid_full", &n);
     XAspace as = { 5 }; XLoadResult r;
-    CHECK(xload_exb(NULL, 1, img, n, &r) == XLOAD_E_ARG, "null address space");
-    CHECK(xload_exb(&as, 1, NULL, n, &r) == XLOAD_E_ARG, "null image");
-    CHECK(xload_exb(&as, 1, img, 0, &r) == XLOAD_E_ARG, "zero size");
-    CHECK(xload_exb(&as, 0, img, n, &r) == XLOAD_E_ARG, "owner 0 is the kernel, refused");
+    CHECK(xload_exb(NULL, 1, 1, img, n, &r) == XLOAD_E_ARG, "null address space");
+    CHECK(xload_exb(&as, 1, 1, NULL, n, &r) == XLOAD_E_ARG, "null image");
+    CHECK(xload_exb(&as, 1, 1, img, 0, &r) == XLOAD_E_ARG, "zero size");
+    CHECK(xload_exb(&as, 0, 1, img, n, &r) == XLOAD_E_ARG, "owner 0 is the kernel, refused");
     CHECK(alloc_calls == 0 && live_tokens() == 0, "bad arguments touch nothing");
 
     quota_ok_answer = 0;
-    CHECK(xload_exb(&as, 1, img, n, &r) == XLOAD_E_QUOTA, "quota denied");
+    CHECK(xload_exb(&as, 1, 1, img, n, &r) == XLOAD_E_QUOTA, "quota denied");
     CHECK(alloc_calls == 0, "quota denied before any frame is requested");
     free(img);
 }
@@ -228,7 +228,7 @@ static void test_alloc_failures(void) {
         reset();
         fail_alloc_at = k;
         XAspace as = { 6 }; XLoadResult r;
-        int rc = xload_exb(&as, 1, img, n, &r);
+        int rc = xload_exb(&as, 1, 1, img, n, &r);
         CHECK(rc == XLOAD_E_NOMEM, "alloc #%d fails -> NOMEM (got %d)", k, rc);
         CHECK(live_tokens() == 0, "alloc #%d fails -> no token left alive (got %d)", k, live_tokens());
         CHECK(live_maps() == 0, "alloc #%d fails -> no mapping left (got %d)", k, live_maps());
@@ -246,7 +246,7 @@ static void test_map_failures(void) {
         reset();
         fail_map_at = k;
         XAspace as = { 7 }; XLoadResult r;
-        int rc = xload_exb(&as, 1, img, n, &r);
+        int rc = xload_exb(&as, 1, 1, img, n, &r);
         CHECK(rc == XLOAD_E_MAP, "map #%d fails -> MAP (got %d)", k, rc);
         CHECK(live_tokens() == 0 && live_maps() == 0 && live_frames() == 0,
               "map #%d fails -> everything undone (tokens=%d maps=%d frames=%d)",

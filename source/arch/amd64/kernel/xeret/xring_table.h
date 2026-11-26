@@ -20,9 +20,8 @@
  * contract as nvme_route_bind: fails if the id already has a live route. */
 typedef int (*KrBindFn)(uint32_t id, void (*fn)(void *arg, uint32_t slot, int32_t st), void *arg);
 void     xrt_init(KrUnbindFn unbind, KrBindFn bind);
-void     xrt_set_cap(UINT32 owner, UINT32 n);
 UINT32   xrt_owner_count(UINT32 owner);
-int      xrt_create(UINT32 owner, UINT32 entries, XToken *out);
+int      xrt_create(UINT32 owner, XToken budget, UINT32 entries, XToken *out);
 int      xrt_destroy(UINT32 owner, XToken tok);
 void     xrt_reap(void);
 /* Id of the ring that this token names for this owner, or -1. A foreign

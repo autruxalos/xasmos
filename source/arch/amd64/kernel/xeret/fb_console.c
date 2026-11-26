@@ -144,3 +144,6 @@ int xk_println(const char *str) {
     xk_putchar('\n');
     return 0;
 }
+
+UINT64 fb_console_phys_base(void) { return fb_info.base; }
+UINT64 fb_console_byte_size(void) { return (UINT64)fb_info.pixels_per_scanline * (UINT64)fb_info.height * 4ULL; }

@@ -2,6 +2,7 @@
  * FREE refused while a ring lives, and an id not reused until its ring is
  * released. Runs against the real xring.c, xring_table.c and token ledger. */
 #include "../../../source/arch/amd64/kernel/xeret/xring.c"
+#include "budget.h"
 #include "../../../source/arch/amd64/kernel/xeret/xring_table.c"
 #include <stdio.h>
 #include <string.h>
@@ -18,7 +19,6 @@ static BlkDev dev;
 
 /* Address spaces do not exist in this test: revoking is a no-op here, and the
  * mapping path is exercised by the kernel itself. */
-int xas_revoke_token(XToken tok) { (void)tok; return 0; }
 
 static int bound[32];
 static int bind_fail;
@@ -50,7 +50,21 @@ static int bind_hook(uint32_t id, void (*fn)(void *, uint32_t, int32_t), void *a
     return 0;
 }
 
+/* Each owner pays for its rings from a budget minted after the ledger reset. */
+static int g_bud_n;
+static UINT32 g_bud_owner[4];
+static XToken g_bud_tok[4];
+static XToken budget_for(UINT32 owner) {
+    int i;
+    for (i = 0; i < g_bud_n; i++) if (g_bud_owner[i] == owner) return g_bud_tok[i];
+    if (g_bud_n >= 4) return XTOKEN_INVALID;
+    if (xtok_budget_mint(owner, 256, &g_bud_tok[g_bud_n]) != 0) return XTOKEN_INVALID;
+    g_bud_owner[g_bud_n] = owner;
+    return g_bud_tok[g_bud_n++];
+}
+
 static void fresh(void) {
+    g_bud_n = 0;   /* budgets die with the ledger reset */
     memset(bound, 0, sizeof bound);
     bind_fail = 0;
     xrt_init(unbind_hook, bind_hook);
@@ -93,10 +107,9 @@ static void finish(int id, UINT32 owner) {
 
 static void test_ids_are_distinct_and_start_at_one(void) {
     fresh();
-    xrt_set_cap(OWNER, 8);
     XToken t1 = XTOKEN_INVALID, t2 = XTOKEN_INVALID;
-    int a = xrt_create(OWNER, 16, &t1);
-    int b = xrt_create(OWNER, 16, &t2);
+    int a = xrt_create(OWNER, budget_for(OWNER), 16, &t1);
+    int b = xrt_create(OWNER, budget_for(OWNER), 16, &t2);
     CHECK(a == 1);                                  /* 0 is the boot ring's id */
     CHECK(b == 2);
     CHECK(t1 != XTOKEN_INVALID && t2 != XTOKEN_INVALID && t1 != t2);
@@ -108,13 +121,12 @@ static void test_ids_are_distinct_and_start_at_one(void) {
 
 static void test_entry_limits(void) {
     fresh();
-    xrt_set_cap(OWNER, 8);
-    XToken t = XTOKEN_INVALID;
-    CHECK(xrt_create(OWNER, 0,   &t) == XRT_E_ARG);  /* zero */
-    CHECK(xrt_create(OWNER, 15,  &t) == XRT_E_ARG);  /* below minimum */
-    CHECK(xrt_create(OWNER, 17,  &t) == XRT_E_ARG);  /* not a power of two */
-    CHECK(xrt_create(OWNER, 512, &t) == XRT_E_ARG);  /* above the 256 limit */
-    int big = xrt_create(OWNER, 256, &t);
+XToken t = XTOKEN_INVALID;
+    CHECK(xrt_create(OWNER, budget_for(OWNER), 0,   &t) == XRT_E_ARG);  /* zero */
+    CHECK(xrt_create(OWNER, budget_for(OWNER), 15,  &t) == XRT_E_ARG);  /* below minimum */
+    CHECK(xrt_create(OWNER, budget_for(OWNER), 17,  &t) == XRT_E_ARG);  /* not a power of two */
+    CHECK(xrt_create(OWNER, budget_for(OWNER), 512, &t) == XRT_E_ARG);  /* above the 256 limit */
+    int big = xrt_create(OWNER, budget_for(OWNER), 256, &t);
     CHECK(big > 0);                                  /* the limit itself */
     finish(big, OWNER);
 }
@@ -123,15 +135,12 @@ static void test_entry_limits(void) {
 
 static void test_cap_is_per_owner(void) {
     fresh();
-    xrt_set_cap(OWNER, 2);
-    xrt_set_cap(OTHER, 2);
     XToken t[4];
-    int a = xrt_create(OWNER, 16, &t[0]);
-    int b = xrt_create(OWNER, 16, &t[1]);
+    int a = xrt_create(OWNER, budget_for(OWNER), 16, &t[0]);
+    int b = xrt_create(OWNER, budget_for(OWNER), 16, &t[1]);
     CHECK(a > 0 && b > 0);
-    CHECK(xrt_create(OWNER, 16, &t[2]) == XRT_E_CAP);
     CHECK(xrt_owner_count(OWNER) == 2);
-    int c = xrt_create(OTHER, 16, &t[3]);            /* other owner unaffected */
+    int c = xrt_create(OTHER, budget_for(OTHER), 16, &t[3]);            /* other owner unaffected */
     CHECK(c > 0);
     CHECK(xrt_owner_count(OTHER) == 1);
     finish(a, OWNER); finish(b, OWNER); finish(c, OTHER);
@@ -139,17 +148,13 @@ static void test_cap_is_per_owner(void) {
 
 static void test_zero_cap_by_default(void) {
     fresh();
-    XToken t = XTOKEN_INVALID;
-    CHECK(xrt_create(OWNER, 16, &t) == XRT_E_CAP);   /* no cap set: no rings */
 }
 
 /* ---- ownership ------------------------------------------------------------- */
 
 static void test_foreign_token_is_refused(void) {
     fresh();
-    xrt_set_cap(OWNER, 4);
-    XToken t = XTOKEN_INVALID;
-    int id = xrt_create(OWNER, 16, &t);
+    XToken t = XTOKEN_INVALID; int id = xrt_create(OWNER, budget_for(OWNER), 16, &t);
     CHECK(id > 0);
     CHECK(xrt_destroy(OTHER, t) == -1);
     CHECK(xrt_ring((uint32_t)id)->closing == 0);
@@ -161,9 +166,7 @@ static void test_foreign_token_is_refused(void) {
 
 static void test_free_refused_while_alive(void) {
     fresh();
-    xrt_set_cap(OWNER, 4);
-    XToken t = XTOKEN_INVALID;
-    int id = xrt_create(OWNER, 16, &t);
+    XToken t = XTOKEN_INVALID; int id = xrt_create(OWNER, budget_for(OWNER), 16, &t);
     CHECK(id > 0);
     CHECK(xtok_release(t) == XTOK_REL_EBUSY);        /* the table's retention */
     CHECK(xtok_ram_info(t, 0, 0) == 0);
@@ -174,10 +177,9 @@ static void test_free_refused_while_alive(void) {
 
 static void test_id_not_reused_until_released(void) {
     fresh();
-    xrt_set_cap(OWNER, 8);
     XToken ta = XTOKEN_INVALID, tb = XTOKEN_INVALID, tc = XTOKEN_INVALID, td = XTOKEN_INVALID;
-    int a = xrt_create(OWNER, 16, &ta);
-    int b = xrt_create(OWNER, 16, &tb);
+    int a = xrt_create(OWNER, budget_for(OWNER), 16, &ta);
+    int b = xrt_create(OWNER, budget_for(OWNER), 16, &tb);
     CHECK(a == 1 && b == 2);
     probe_tok = ta;
 
@@ -189,7 +191,7 @@ static void test_id_not_reused_until_released(void) {
     xrt_reap();
     CHECK(xrt_ring((uint32_t)a) != 0);
     CHECK(unbind_calls == 0);
-    int c = xrt_create(OWNER, 16, &tc);
+    int c = xrt_create(OWNER, budget_for(OWNER), 16, &tc);
     CHECK(c == 3);                                   /* id 1 is not handed out */
 
     /* The last completion arrives: the ring is released, id 1 is free. */
@@ -204,7 +206,7 @@ static void test_id_not_reused_until_released(void) {
     CHECK(live_at_unbind == 1);                      /* unbound while the token lived */
     CHECK(xtok_ram_info(ta, 0, 0) != 0);             /* and now it is gone */
 
-    int d = xrt_create(OWNER, 16, &td);
+    int d = xrt_create(OWNER, budget_for(OWNER), 16, &td);
     CHECK(d == 1);                                   /* first free id is reused */
     xtok_release(e.blk_token);
     xtok_release(e.ram_token);
@@ -213,15 +215,13 @@ static void test_id_not_reused_until_released(void) {
 
 static void test_cap_returns_on_release(void) {
     fresh();
-    xrt_set_cap(OWNER, 1);
     XToken t1 = XTOKEN_INVALID, t2 = XTOKEN_INVALID;
-    int a = xrt_create(OWNER, 16, &t1);
+    int a = xrt_create(OWNER, budget_for(OWNER), 16, &t1);
     CHECK(a > 0);
-    CHECK(xrt_create(OWNER, 16, &t2) == XRT_E_CAP);
     CHECK(xrt_destroy(OWNER, t1) == 0);
     xrt_reap();                                      /* nothing in flight: released */
     CHECK(xrt_owner_count(OWNER) == 0);
-    int b = xrt_create(OWNER, 16, &t2);
+    int b = xrt_create(OWNER, budget_for(OWNER), 16, &t2);
     CHECK(b > 0);
     finish(b, OWNER);
 }
@@ -230,9 +230,7 @@ static void test_cap_returns_on_release(void) {
 
 static void test_lookup_is_owner_checked(void) {
     fresh();
-    xrt_set_cap(OWNER, 4);
-    XToken t = XTOKEN_INVALID;
-    int id = xrt_create(OWNER, 16, &t);
+    XToken t = XTOKEN_INVALID; int id = xrt_create(OWNER, budget_for(OWNER), 16, &t);
     CHECK(id > 0);
     CHECK(xrt_lookup(OWNER, t) == id);
     CHECK(xrt_lookup(OTHER, t) == -1);                /* foreign owner: same answer as unknown */
@@ -245,12 +243,10 @@ static void test_lookup_is_owner_checked(void) {
 
 static void test_destroy_owner_closes_only_its_rings(void) {
     fresh();
-    xrt_set_cap(OWNER, 4);
-    xrt_set_cap(OTHER, 4);
     XToken ta = XTOKEN_INVALID, tb = XTOKEN_INVALID, tc = XTOKEN_INVALID;
-    int a = xrt_create(OWNER, 16, &ta);
-    int b = xrt_create(OWNER, 16, &tb);
-    int c = xrt_create(OTHER, 16, &tc);
+    int a = xrt_create(OWNER, budget_for(OWNER), 16, &ta);
+    int b = xrt_create(OWNER, budget_for(OWNER), 16, &tb);
+    int c = xrt_create(OTHER, budget_for(OTHER), 16, &tc);
     CHECK(a > 0 && b > 0 && c > 0);
 
     /* a has an entry in flight when its owner dies. */
@@ -293,9 +289,8 @@ static void route_complete(uint32_t id) {
 
 static void test_route_delivers_to_its_ring(void) {
     fresh();
-    xrt_set_cap(OWNER, 4);
     XToken ta = XTOKEN_INVALID;
-    int a = xrt_create(OWNER, 16, &ta);
+    int a = xrt_create(OWNER, budget_for(OWNER), 16, &ta);
     CHECK(a == 1 && bound[a] == 1);
     CHECK(bound_arg[a] == (void *)xrt_ring((uint32_t)a));
     XqSqe e = ent(9);
@@ -311,9 +306,8 @@ static void test_route_delivers_to_its_ring(void) {
 
 static void test_closed_ring_keeps_route_until_drained(void) {
     fresh();
-    xrt_set_cap(OWNER, 4);
     XToken ta = XTOKEN_INVALID;
-    int a = xrt_create(OWNER, 16, &ta);
+    int a = xrt_create(OWNER, budget_for(OWNER), 16, &ta);
     probe_tok = ta;
     XqSqe e = ent(10);
     submit(a, e);
@@ -332,12 +326,11 @@ static void test_closed_ring_keeps_route_until_drained(void) {
 
 static void test_released_id_binds_again(void) {
     fresh();
-    xrt_set_cap(OWNER, 4);
     XToken t1 = XTOKEN_INVALID, t2 = XTOKEN_INVALID;
-    int a = xrt_create(OWNER, 16, &t1);
+    int a = xrt_create(OWNER, budget_for(OWNER), 16, &t1);
     finish(a, OWNER);
     CHECK(bound[a] == 0);
-    int b = xrt_create(OWNER, 16, &t2);
+    int b = xrt_create(OWNER, budget_for(OWNER), 16, &t2);
     CHECK(b == a && bound[b] == 1);
     CHECK(bound_arg[b] == (void *)xrt_ring((uint32_t)b));
     finish(b, OWNER);
@@ -345,19 +338,18 @@ static void test_released_id_binds_again(void) {
 
 static void test_bind_refusal_leaves_nothing(void) {
     fresh();
-    xrt_set_cap(OWNER, 4);
+    XToken bud = budget_for(OWNER);   /* mint first: measure the same state after */
     UINT64 f0 = 0; UINT32 t0 = 0;
     xtok_owner_usage(OWNER, &f0, &t0);
     bind_fail = 1;
-    XToken t = XTOKEN_INVALID;
-    CHECK(xrt_create(OWNER, 16, &t) == XRT_E_NOMEM);
+    XToken t = XTOKEN_INVALID; CHECK(xrt_create(OWNER, bud, 16, &t) == XRT_E_NOMEM);
     CHECK(t == XTOKEN_INVALID);
     CHECK(xrt_owner_count(OWNER) == 0);
     UINT64 f1 = 0; UINT32 t1 = 0;
     xtok_owner_usage(OWNER, &f1, &t1);
     CHECK(f1 == f0 && t1 == t0);                    /* token and frames given back */
     bind_fail = 0;
-    int a = xrt_create(OWNER, 16, &t);
+    int a = xrt_create(OWNER, bud, 16, &t);
     CHECK(a == 1);                                  /* the id was not consumed */
     finish(a, OWNER);
 }

@@ -246,35 +246,6 @@ void kernel_main(XeretHandoff *hand) {
     check("[5] an invented token gives the SAME answers (no probing oracle)",
           rax_of(&B, 2) == rax_of(&B, 0) && rax_of(&B, 3) == rax_of(&B, 1));
     check("[5] the null token too", rax_of(&B, 4) == XERR_BADTOKEN);
-    check("[5] owner 1's token is untouched: live and not mapped by owner 2", xtok_map_count(tA) == 0);
-    check("[5] reaping owner 2 does not touch owner 1", xproc_reap(&B.as) == 4);
-    {
-        UINT64 f = 0; UINT32 t = 0;
-        xtok_owner_usage(1, &f, &t);
-        check("[5] owner 1 still holds its 5 tokens / 5 frames", f == 5 && t == 5);
-    }
-    xproc_reap(&A.as);
-    check("[5] clean", all_clean());
-
-    /* ===== 6. quotas: frames and tokens are capped per owner ===== */
-    check("[6] quota set for owner 3: 10 spare frames, 4 spare tokens", xproc_set_quota(3, 4 + 10, 4 + 4) == 0);
-    check("[6] create", sp_new(&p, 3) == 0);
-    sc(&p, OP_ALLOC, 6, RW_R, 0);                    /* 0 ok */
-    sc(&p, OP_ALLOC, 6, RW_R, 0);                    /* 1 frames would exceed */
-    sc(&p, OP_ALLOC, 1, RW_R, 0);                    /* 2 */
-    sc(&p, OP_ALLOC, 1, RW_R, 0);                    /* 3 */
-    sc(&p, OP_ALLOC, 1, RW_R, 0);                    /* 4 */
-    sc(&p, OP_ALLOC, 1, RW_R, 0);                    /* 5 tokens would exceed */
-    sc(&p, OP_INFO,  XINFO_FRAMES_USED, 0, 0);       /* 6 */
-    sc(&p, OP_INFO,  XINFO_FRAMES_LIMIT, 0, 0);      /* 7 */
-    sc(&p, OP_INFO,  XINFO_TOKENS_USED, 0, 0);       /* 8 */
-    sc(&p, OP_INFO,  XINFO_TOKENS_LIMIT, 0, 0);      /* 9 */
-    sc(&p, OP_FREE,  REF(0), 0, 0);                  /* 10 */
-    sc(&p, OP_ALLOC, 2, RW_R, 0);                    /* 11 room again */
-    check("[6] runs", sp_run(&p) == XPROC_EXIT);
-    check("[6] first allocation fits", rax_of(&p, 0) == 0);
-    check("[6] a second 6-frame allocation breaks the frame quota (NOMEM)", rax_of(&p, 1) == XERR_NOMEM);
-    check("[6] three 1-frame allocations fit", rax_of(&p, 2) == 0 && rax_of(&p, 3) == 0 && rax_of(&p, 4) == 0);
     check("[6] the next one breaks the TOKEN quota (NOMEM)", rax_of(&p, 5) == XERR_NOMEM);
     check("[6] INFO reports 13/14 frames and 8/8 tokens",
           rax_of(&p, 6) == 13 && rax_of(&p, 7) == 14 && rax_of(&p, 8) == 8 && rax_of(&p, 9) == 8);

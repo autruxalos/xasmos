@@ -24,6 +24,7 @@ int storage_open(void);
 
 /* The open device, or NULL if storage_open() has not succeeded. */
 BlkDev *storage_device(void);
+BlkDev *storage_usb_device(void);
 
 /* 1 if the open device is the test disk (serial "xasmos"), else 0. */
 int storage_is_test_disk(void);

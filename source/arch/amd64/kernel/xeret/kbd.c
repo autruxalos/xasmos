@@ -6,7 +6,7 @@ extern void xk_putchar(char c);          /* fb_console.c */
 
 /* Diagnostic: when 1, every raw status/scancode pair is written to COM1.
  * Set to 0 once the keyboard path is confirmed. */
-#define KBD_DEBUG 1
+#define KBD_DEBUG 0
 
 #if KBD_DEBUG
 extern void serial_puts(const char *s);
@@ -104,12 +104,15 @@ int xk_pollkey(void) {
     return -1;
 }
 
+extern int usb_hid_poll_char(char *ch_out);
 int xk_getkey(void) {
     int c;
-    while ((c = xk_pollkey()) < 0) {
+    char uch = 0;
+    for (;;) {
+        if ((c = xk_pollkey()) >= 0) return c;
+        if (usb_hid_poll_char(&uch)) return (unsigned char)uch;
         __asm__ volatile ("pause");
     }
-    return c;
 }
 
 int xk_readline(char *buffer, int max_chars) {

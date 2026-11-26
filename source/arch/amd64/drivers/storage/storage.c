@@ -4,12 +4,15 @@
  ******************************************************************************/
 #include "../pci/pci.h"
 #include "nvme/nvme.h"
+#include "../usb/storage/usb_msc.h"
 #include "storage.h"
 
 #define TEST_SERIAL "xasmos"
 
 static BlkDev g_dev;
 static int    g_open;
+static BlkDev g_usb_dev;
+static int    g_usb_open;
 static int    g_test;
 
 static int same_str(const char *a, const char *b) {
@@ -32,6 +35,14 @@ int storage_open(void) {
               same_str(serial, TEST_SERIAL));
     g_open = 1;
     return STORAGE_OK;
+}
+
+BlkDev *storage_usb_device(void) {
+    if (!g_usb_open) {
+        if (usb_msc_blkdev(&g_usb_dev) != 0) return 0;
+        g_usb_open = 1;
+    }
+    return &g_usb_dev;
 }
 
 BlkDev *storage_device(void) {

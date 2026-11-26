@@ -24,20 +24,25 @@
 #define XSYS_UNMAP  6u    /* rdi=virt                   -> rax                */
 #define XSYS_FREE   7u    /* rdi=token                  -> rax                */
 #define XSYS_INFO   8u    /* rdi=XINFO_*                -> rax=value or XERR  */
-#define XSYS_REQUEST_BLOCKS 9u  /* rdi=name ptr rsi=first block rdx=count rcx=rights -> rdx=token, rax=0 or XERR_* */
+/* 9 is reserved: the name-based request was retired (F4). */
 #define XSYS_QUEUE_CREATE 10u  /* rdi=entries (16..256, pow2) -> rax=0, rdx=token */
 #define XSYS_QUEUE_RING   11u  /* rdi=token -> rax=entries processed (a hint)    */
 #define XSYS_QUEUE_CLOSE  12u  /* rdi=token -> rax=0; released once drained      */
 #define XSYS_DERIVE      13u  /* rdi=parent rsi=first rdx=count rcx=rights -> rdx=child, rax=0 or XERR_* */
+#define XSYS_ALLOC_FROM  14u  /* rdi=budget rsi=frames rdx=rights -> rdx=token, rax=0 or XERR_* */
+#define XSYS_BUDGET_DERIVE 15u  /* rdi=budget rsi=frames -> rdx=child, rax=0 or XERR_* */
+#define XSYS_OFFER         16u  /* rdi=token (GIVE) rsi=SEND -> rax=0 or XERR_*           */
+#define XSYS_ACCEPT        17u  /* rdi=RECV -> rdx=token, rax=0 or XERR_*                 */
+#define XSYS_WRITE          18u
+#define XSYS_READLINE       19u
+#define XSYS_CLEAR          20u
 
 /* Size of the resource dispatch table. Every XSYS_* above must be below it:
  * the static assert in sys.c fails the build otherwise. */
-#define XSYS_TABLE_SIZE 16u
+#define XSYS_TABLE_SIZE 32u
 
 #define XINFO_FRAMES_USED   0u
-#define XINFO_FRAMES_LIMIT  1u
 #define XINFO_TOKENS_USED   2u
-#define XINFO_TOKENS_LIMIT  3u
 
 /* Rights a process may ask for. DMA is deliberately absent: only the kernel
  * hands out device-facing memory. */
@@ -101,7 +106,6 @@ int  xproc_run(XAspace *as, UINT64 entry, UINT64 user_rsp, XProcResult *res);
 
 /* Per-owner limits on frames and tokens (owner < 64; others use the default
  * of 2048 frames / 256 tokens). Kernel-minted tokens count too. */
-int    xproc_set_quota(UINT32 owner, UINT64 max_frames, UINT32 max_tokens);
 
 /* Process teardown. Revokes every mapping of every token the owner holds,
  * reclaims those tokens (whether or not they carry RELEASE), and destroys
