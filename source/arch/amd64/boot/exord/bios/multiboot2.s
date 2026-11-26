@@ -1,9 +1,9 @@
 .code32
 .section .multiboot
 .align 4
-.long 0x1BADB002                      /* magic Multiboot v1 real */
-.long 0x00000003                      /* flags: alinear módulos + info de memoria */
-.long -(0x1BADB002 + 0x00000003)      /* checksum */
+.long 0x1BADB002
+.long 0x00000003
+.long -(0x1BADB002 + 0x00000003)
 
 .section .text
 .global _start
@@ -12,6 +12,8 @@
 _start:
     cli
     movl $stack_top, %esp
+    pushl %ebx
+    pushl %eax
     call kernel_main
 .halt:
     hlt

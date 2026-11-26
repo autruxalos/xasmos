@@ -1,12 +1,12 @@
 #include "bios_handoff.h"
 
 typedef struct {
-    UINT32 Type;
-    UINT32 Pad;
-    UINT64 PhysicalStart;
-    UINT64 VirtualStart;
-    UINT64 NumberOfPages;
-    UINT64 Attribute;
+    uint32_t Type;
+    uint32_t Pad;
+    uint64_t PhysicalStart;
+    uint64_t VirtualStart;
+    uint64_t NumberOfPages;
+    uint64_t Attribute;
 } BiosEfiMemDesc;
 
 int exord_bios_build_handoff(uint32_t mb_magic,
@@ -50,7 +50,7 @@ int exord_bios_build_handoff(uint32_t mb_magic,
     out_handoff->fb.pixels_per_scanline = (params->fb_bpp >= 24u && params->fb_pitch > 0u)
         ? (params->fb_pitch / (params->fb_bpp / 8u)) : params->fb_width;
     out_handoff->fb.pixel_format = PixelBlueGreenRedReserved8BitPerColor;
-    out_handoff->mmap_addr = (UINT64)(uintptr_t)out_efi_mmap_buf;
+    out_handoff->mmap_addr = (uint64_t)(uintptr_t)out_efi_mmap_buf;
     out_handoff->mmap_size = count * desc_sz;
     out_handoff->mmap_desc_size = desc_sz;
     out_handoff->mmap_desc_version = 1u;

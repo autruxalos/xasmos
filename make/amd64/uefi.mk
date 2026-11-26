@@ -110,7 +110,7 @@ CFLAGS := -target x86_64-unknown-windows -ffreestanding -fshort-wchar \
           -I$(SRC_DIR)/arch/amd64/drivers/storage \
           -I$(SRC_DIR)/arch/amd64/drivers/pci \
 	-I$(SRC_DIR)/arch/amd64/drivers/usb/xhci \
-	-I$(SRC_DIR)/arch/amd64/drivers/usb/storage -I$(SRC_DIR)/arch/amd64/drivers/usb/hid -I$(SRC_DIR)/arch/amd64/drivers/net/e1000 -I$(SRC_DIR)/arch/amd64/drivers/audio/hda -I$(SRC_DIR)/arch/amd64/drivers/iommu -I$(SRC_DIR)/arch/amd64/boot/exord/bios \
+	-I$(SRC_DIR)/arch/amd64/drivers/usb/storage -I$(SRC_DIR)/arch/amd64/drivers/usb/hid -I$(SRC_DIR)/arch/amd64/drivers/net/e1000 -I$(SRC_DIR)/arch/amd64/drivers/audio/hda -I$(SRC_DIR)/arch/amd64/drivers/iommu -I$(SRC_DIR)/arch/amd64/boot/exord/bios -I$(SRC_DIR)/arch/amd64/apps/services \
 	-I$(SRC_DIR)/arch/amd64/drivers/storage/ahci \
 	-I$(SRC_DIR)/arch/amd64/drivers/storage/ide \
           -I$(SRC_DIR)/arch/amd64/apps/xsh/utils \
@@ -241,7 +241,7 @@ $(HOST_BIN)/ahci_q_test: $(HOST_BIN) tests/core/storage/ahci_q_test.c $(SRC_DIR)
 	$(HOST_CC) -I$(SRC_DIR)/arch/amd64/drivers/storage/ahci tests/core/storage/ahci_q_test.c $(SRC_DIR)/arch/amd64/drivers/storage/ahci/ahci_q.c -o $@
 
 $(HOST_BIN)/usb_msc_q_test: $(HOST_BIN) tests/core/usb/usb_msc_q_test.c $(SRC_DIR)/arch/amd64/drivers/usb/storage/usb_msc_q.c $(SRC_DIR)/arch/amd64/drivers/usb/storage/usb_msc_q.h
-	$(HOST_CC) -I$(SRC_DIR)/arch/amd64/drivers/usb/storage -I$(SRC_DIR)/arch/amd64/drivers/usb/hid -I$(SRC_DIR)/arch/amd64/drivers/net/e1000 -I$(SRC_DIR)/arch/amd64/drivers/audio/hda -I$(SRC_DIR)/arch/amd64/drivers/iommu -I$(SRC_DIR)/arch/amd64/boot/exord/bios tests/core/usb/usb_msc_q_test.c $(SRC_DIR)/arch/amd64/drivers/usb/storage/usb_msc_q.c -o $@
+	$(HOST_CC) -I$(SRC_DIR)/arch/amd64/drivers/usb/storage -I$(SRC_DIR)/arch/amd64/drivers/usb/hid -I$(SRC_DIR)/arch/amd64/drivers/net/e1000 -I$(SRC_DIR)/arch/amd64/drivers/audio/hda -I$(SRC_DIR)/arch/amd64/drivers/iommu -I$(SRC_DIR)/arch/amd64/boot/exord/bios -I$(SRC_DIR)/arch/amd64/apps/services tests/core/usb/usb_msc_q_test.c $(SRC_DIR)/arch/amd64/drivers/usb/storage/usb_msc_q.c -o $@
 
 $(HOST_BIN)/xhci_q_test: $(HOST_BIN) tests/core/usb/xhci_q_test.c $(SRC_DIR)/arch/amd64/drivers/usb/xhci/xhci_q.c $(SRC_DIR)/arch/amd64/drivers/usb/xhci/xhci_q.h
 	$(HOST_CC) -I$(SRC_DIR)/arch/amd64/drivers/usb/xhci tests/core/usb/xhci_q_test.c $(SRC_DIR)/arch/amd64/drivers/usb/xhci/xhci_q.c -o $@
