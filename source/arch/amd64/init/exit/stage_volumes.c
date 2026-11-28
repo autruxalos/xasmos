@@ -1,6 +1,7 @@
 #include "hda.h"
 #include "serviceexfs_exb.h"
 #include "serviceauxlad_exb.h"
+#include "y_exb.h"
 #include "e1000.h"
 #include "usb_hid.h"
 /******************************************************************************
@@ -522,6 +523,20 @@ void exit_launch_shell(void) {
     (void)xep_create(g_shell_owner, &ep_rep_r);
     (void)xep_send_cap(g_shell_owner, ep_rep_r, g_shell_owner, &ep_rep_s);
     XContext ctx; XProcResult r;
+    UINT32 own_y = owner_new();
+    XToken bud_y = XTOKEN_INVALID, ep_y_r = XTOKEN_INVALID, ep_y_s = XTOKEN_INVALID;
+    XAspace as_y; XLoadResult res_y; XContext ctx_y; int y_ok = 0;
+    if (own_y && xtok_budget_mint(own_y, 256, &bud_y) == 0 &&
+        xep_create(own_y, &ep_y_r) == 0 &&
+        xep_send_cap(own_y, ep_y_r, g_shell_owner, &ep_y_s) == 0 &&
+        xas_create(&as_y, own_y) == XAS_OK &&
+        xload_exb(&as_y, own_y, (uint64_t)bud_y, g_y_exb, g_y_exb_len, &res_y) == XLOAD_OK) {
+        xctx_init(&ctx_y, res_y.entry, res_y.stack_top);
+        ctx_y.rdi = (UINT64)ep_y_r;
+        ctx_y.rdx = (UINT64)g_shell_fb0;
+        y_ok = 1;
+        xk_println("[SERVICE] y.exb armed (ring-3 zero-copy IPC)");
+    }
     xctx_init(&ctx, res.entry, res.stack_top);
     ctx.rdi = (UINT64)ep_exfs_s;
     ctx.rsi = (UINT64)ep_aux_s;

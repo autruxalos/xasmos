@@ -429,3 +429,5 @@ efi: $(EFI_OUT)
 
 clean:
 	rm -rf $(BUILD) $(HOST_BIN)
+
+all: efi
